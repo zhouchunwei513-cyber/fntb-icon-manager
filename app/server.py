@@ -90,9 +90,25 @@ def get_app_title_from_ui_config(ui_config, applaunchname):
 
 
 def resolve_display_name(manifest, app_dir, appname):
-    """解析应用显示名称，优先级：ui/config title > manifest display_name > PO文件 > appname"""
+    """解析应用显示名称，优先级：ui/config title > manifest display_name > PO文件 > 已知映射 > appname"""
     applaunchname = manifest.get("desktop_applaunchname", "")
     raw = manifest.get("display_name", "")
+
+    # 已知应用中文名映射（当 PO 文件不可用时的兜底）
+    KNOWN_NAMES = {
+        "trim.media": "媒体",
+        "trim.music": "音乐",
+        "trim.preview": "预览",
+        "trim.snapshots": "快照",
+        "trim.text-editor": "文本编辑器",
+        "trim.docs": "Office文档",
+        "trim.browser": "浏览器",
+        "leelaa.pdfload": "PDF阅读器",
+        "qBittorrent": "qBittorrent",
+        "python312": "Python 3.12",
+        "nodejs_v22": "Node.js v22",
+        "nodejs_v24": "Node.js v24",
+    }
 
     # 1. 优先从 ui/config 获取 title
     if applaunchname:
@@ -131,7 +147,11 @@ def resolve_display_name(manifest, app_dir, appname):
                     except Exception:
                         pass
 
-    # 4. 最终回退
+    # 4. 已知应用映射
+    if appname in KNOWN_NAMES:
+        return KNOWN_NAMES[appname]
+
+    # 5. 最终回退
     readable = appname.split(".")[-1] if "." in appname else appname
     readable = readable.replace("-", " ").replace("_", " ").title()
     return readable

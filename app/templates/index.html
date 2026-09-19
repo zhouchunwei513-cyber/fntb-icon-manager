@@ -222,6 +222,7 @@
                     <option value="error.log">error.log (错误日志)</option>
                 </select>
                 <button class="btn" onclick="loadLogs()" style="margin-left:auto;">刷新</button>
+                <button class="btn" onclick="exportLogs()" style="background:#2d6a4f;">导出</button>
             </div>
             <pre id="logContent" style="background:#0d1117;padding:16px;border-radius:8px;max-height:500px;overflow-y:auto;font-size:13px;color:#7ee787;white-space:pre-wrap;word-break:break-all;margin:0;"></pre>
             <p id="logVarDir" style="color:#888;font-size:12px;margin-top:8px;"></p>
@@ -295,12 +296,33 @@ async function loadLogs() {
         const data = await resp.json();
         if (data.error) {
             el.textContent = `错误: ${data.error}\n\nvar 目录: ${data.var_dir || '未知'}\n\n如果日志文件不存在，说明应用刚刚启动或日志路径配置有误。`;
+            dirEl.textContent = "";
         } else {
             el.textContent = data.lines.join("\n") || "(日志为空)";
             dirEl.textContent = `日志目录: ${data.var_dir} | 共 ${data.total_lines} 行`;
         }
     } catch(e) {
         el.textContent = `请求失败: ${e.message}`;
+        dirEl.textContent = "";
+    }
+}
+
+async function exportLogs() {
+    const file = document.getElementById("logFileSelect").value;
+    try {
+        const resp = await fetch(`/api/logs?file=${file}&lines=10000`);
+        const data = await resp.json();
+        if (data.error) { alert("导出失败: " + data.error); return; }
+        const content = data.lines.join("\n");
+        const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${file.replace(".log","")}_${new Date().toISOString().slice(0,19).replace(/:/g,"-")}.log`;
+        a.click();
+        URL.revokeObjectURL(url);
+    } catch(e) {
+        alert("导出失败: " + e.message);
     }
 }
 
