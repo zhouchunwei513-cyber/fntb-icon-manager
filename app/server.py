@@ -167,7 +167,7 @@ def resolve_display_name(manifest, app_dir, appname):
     # 已知应用中文名映射（兜底方案，覆盖 fnOS 官方应用 + 常见第三方）
     KNOWN_NAMES = {
         # fnOS 官方应用（按 trim-* 目录名）
-        "trim.media": "媒体",
+        "trim.media": "影视",
         "trim.music": "音乐",
         "trim.preview": "预览",
         "trim.snapshots": "快照",
@@ -182,7 +182,7 @@ def resolve_display_name(manifest, app_dir, appname):
         "trim.monitor": "资源监控",
         "trim.baidunetdisk": "百度网盘",
         # 按 manifest appname 的变体
-        "trim-media": "媒体",
+        "trim-media": "影视",
         "trim-music": "音乐",
         "trim-preview": "预览",
         "trim-snapshots": "快照",
