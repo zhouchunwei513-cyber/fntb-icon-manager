@@ -193,7 +193,7 @@
             <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px;">
                 以下 API 供飞牛客户端或其他应用调用，获取所有应用图标数据。
             </p>
-            <div id="apiBaseUrl" style="background:var(--bg);padding:8px 12px;border-radius:8px;font-size:13px;margin-bottom:16px;word-break:break-all;"></div>
+            <div id="apiBaseUrl" style="background:var(--bg);padding:12px 16px;border-radius:8px;font-size:15px;margin-bottom:16px;word-break:break-all;cursor:pointer;user-select:all;font-family:monospace;" onclick="navigator.clipboard.writeText(this.textContent);toast('已复制','success');" title="点击复制"></div>
             <table style="width:100%;font-size:13px;border-collapse:collapse;">
                 <thead>
                     <tr style="border-bottom:1px solid var(--border);">
@@ -224,7 +224,7 @@ const API_ENDPOINTS = [
 ];
 function showApiInfo() {
     const baseUrl = window.location.origin;
-    document.getElementById("apiBaseUrl").textContent = "基础地址：" + baseUrl;
+    document.getElementById("apiBaseUrl").textContent = baseUrl;
     const tbody = document.getElementById("apiTableBody");
     tbody.innerHTML = API_ENDPOINTS.map(e =>
         `<tr style="border-bottom:1px solid var(--border);">
