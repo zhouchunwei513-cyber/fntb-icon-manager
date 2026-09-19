@@ -30,8 +30,20 @@ start)
     done
     # fnOS Python 应用路径
     if [ -z "${PYTHON_BIN}" ]; then
-        for vol in /vol1 /vol2 /vol3; do
-            for p in "${vol}/@appcenter/python3.12/bin/python3" "${vol}/@appcenter/python3/bin/python3"; do
+        # 先检查 /var/apps 路径（fnOS 系统应用安装目录）
+        for p in /var/apps/python312/target/bin/python3.12 \
+                 /var/apps/python312/target/bin/python3 \
+                 /usr/local/bin/python3.12 \
+                 /usr/local/bin/python3; do
+            if [ -x "$p" ]; then PYTHON_BIN="$p"; break; fi
+        done
+    fi
+    if [ -z "${PYTHON_BIN}" ]; then
+        for vol in /vol1 /vol2 /vol3 /vol4; do
+            for p in "${vol}/@appcenter/python3.12/bin/python3" \
+                     "${vol}/@appcenter/python3.12/target/bin/python3" \
+                     "${vol}/@appcenter/python3/bin/python3" \
+                     "${vol}/@appcenter/python3/bin/python3.12"; do
                 if [ -x "$p" ]; then PYTHON_BIN="$p"; break 2; fi
             done
         done

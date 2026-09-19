@@ -47,10 +47,6 @@ APPS_CACHE_FILE = os.path.join(VAR_DIR, "apps_cache.json")
 os.makedirs(CUSTOM_ICONS_DIR, exist_ok=True)
 os.makedirs(VAR_DIR, exist_ok=True)
 
-os.makedirs(CUSTOM_ICONS_DIR, exist_ok=True)
-os.makedirs(VAR_DIR, exist_ok=True)
-os.makedirs(APP_DIR, exist_ok=True)
-
 # ── 日志 ──────────────────────────────────────────────
 logger = logging.getLogger("fntb-iconmgr")
 logger.setLevel(logging.INFO)
@@ -89,13 +85,88 @@ def get_app_title_from_ui_config(ui_config, applaunchname):
     return title
 
 
+def _find_po_translation(template_key, app_dir, appname):
+    """在多个位置搜索 PO 文件获取翻译"""
+    import re
+
+    # 搜索 PO 文件的目录列表（包含 fnOS 集中式 locale 目录）
+    search_dirs = [
+        # 应用内目录
+        os.path.join(app_dir, "resource", "locale"),
+        os.path.join(app_dir, "locale"),
+        os.path.join(app_dir, "lang"),
+        os.path.join(app_dir, "resource", "lang"),
+        # fnOS 系统集中式 locale（翻译存在这里）
+        "/usr/trim/locale",
+        "/usr/trim/resource/locale",
+        "/var/apps/trim-base/resource/locale",
+        "/var/apps/trim-base/locale",
+        "/usr/local/share/locale",
+    ]
+    # 也搜索 /vol*/@appcenter/trim-base 路径
+    for vol in ["/vol1", "/vol2", "/vol3", "/vol4"]:
+        search_dirs.append(f"{vol}/@appcenter/trim-base/resource/locale")
+        search_dirs.append(f"{vol}/@appcenter/trim-base/locale")
+    search_dirs.append("/usr/share/trim/locale")
+
+    po_files = ["zh_CN.po", "zh.po", "common.po", "messages.po", "zh_Hans.po", "zh-Hans.po"]
+
+    for search_dir in search_dirs:
+        if not os.path.isdir(search_dir):
+            continue
+        for po_file in po_files:
+            po_path = os.path.join(search_dir, po_file)
+            if os.path.isfile(po_path):
+                try:
+                    with open(po_path, "r", encoding="utf-8", errors="ignore") as f:
+                        content = f.read()
+                    pattern = rf'msgid\s+"{re.escape(template_key)}"\s*\n\s*msgstr\s+"([^"]*)"'
+                    m = re.search(pattern, content)
+                    if m and m.group(1).strip():
+                        return m.group(1).strip()
+                except Exception:
+                    pass
+    return None
+
+
+def _try_trim_service_appname(appname):
+    """尝试通过 trim 内部命令获取应用显示名"""
+    try:
+        import subprocess
+        # 尝试 trim app_info 命令
+        result = subprocess.run(
+            ["/usr/trim/bin/trim", "app", "info", appname],
+            capture_output=True, text=True, timeout=3
+        )
+        if result.returncode == 0 and result.stdout:
+            data = json.loads(result.stdout)
+            name = data.get("display_name", "") or data.get("title", "")
+            if name and "${" not in name:
+                return name
+    except Exception:
+        pass
+    return None
+
+
 def resolve_display_name(manifest, app_dir, appname):
-    """解析应用显示名称，优先级：ui/config title > manifest display_name > PO文件 > 已知映射 > appname"""
+    """
+    解析应用显示名称
+    优先级:
+      1. ui/config 中的 title（如果是直接文本而非模板变量）
+      2. manifest display_name（如果是直接文本）
+      3. PO 文件翻译（搜索应用内 + fnOS 系统集中式 locale 目录）
+      4. trim 内部服务获取
+      5. KNOWN_NAMES 硬编码映射（兜底）
+      6. 目录名可读化（最终回退）
+    """
     applaunchname = manifest.get("desktop_applaunchname", "")
     raw = manifest.get("display_name", "")
+    # 目录名作为备用 appname（有时 manifest appname 和目录名不同）
+    dir_name = os.path.basename(app_dir)
 
-    # 已知应用中文名映射（当 PO 文件不可用时的兜底）
+    # 已知应用中文名映射（兜底方案，覆盖 fnOS 官方应用 + 常见第三方）
     KNOWN_NAMES = {
+        # fnOS 官方应用（按 trim-* 目录名）
         "trim.media": "媒体",
         "trim.music": "音乐",
         "trim.preview": "预览",
@@ -103,11 +174,29 @@ def resolve_display_name(manifest, app_dir, appname):
         "trim.text-editor": "文本编辑器",
         "trim.docs": "Office文档",
         "trim.browser": "浏览器",
+        "trim.photos": "相册",
+        "trim.backup": "备份",
+        "trim.download": "下载",
+        "trim.docker": "Docker",
+        "trim.vm": "虚拟机",
+        "trim.monitor": "资源监控",
+        "trim.baidunetdisk": "百度网盘",
+        # 按 manifest appname 的变体
+        "trim-media": "媒体",
+        "trim-music": "音乐",
+        "trim-preview": "预览",
+        "trim-snapshots": "快照",
+        "trim-text-editor": "文本编辑器",
+        "trim-photos": "相册",
+        # 第三方应用
         "leelaa.pdfload": "PDF阅读器",
-        "qBittorrent": "qBittorrent",
+        "com.fntb.iconmgr": "FNTB图标管理器",
+        # Docker / 系统
         "python312": "Python 3.12",
+        "python3.12": "Python 3.12",
         "nodejs_v22": "Node.js v22",
         "nodejs_v24": "Node.js v24",
+        "qBittorrent": "qBittorrent",
     }
 
     # 1. 优先从 ui/config 获取 title
@@ -121,38 +210,34 @@ def resolve_display_name(manifest, app_dir, appname):
     if raw and "${" not in raw:
         return raw
 
-    # 3. 模板变量，尝试 PO 文件
+    # 3. 模板变量，搜索 PO 文件（包括 fnOS 系统 locale 目录）
     if raw and "${" in raw:
         template_key = raw.replace("${", "").replace("}", "").strip()
-        search_dirs = [
-            os.path.join(app_dir, "resource", "locale"),
-            os.path.join(app_dir, "locale"),
-            os.path.join(app_dir, "lang"),
-        ]
-        po_files = ["zh_CN.po", "zh.po", "common.po", "messages.po"]
-        for search_dir in search_dirs:
-            if not os.path.isdir(search_dir):
-                continue
-            for po_file in po_files:
-                po_path = os.path.join(search_dir, po_file)
-                if os.path.isfile(po_path):
-                    try:
-                        with open(po_path, "r", encoding="utf-8") as f:
-                            content = f.read()
-                        import re
-                        pattern = rf'msgid\s+"{re.escape(template_key)}"\s*\n\s*msgstr\s+"([^"]*)"'
-                        m = re.search(pattern, content)
-                        if m and m.group(1).strip():
-                            return m.group(1).strip()
-                    except Exception:
-                        pass
+        po_result = _find_po_translation(template_key, app_dir, appname)
+        if po_result:
+            return po_result
 
-    # 4. 已知应用映射
+    # 4. 尝试 trim 内部服务
+    trim_result = _try_trim_service_appname(appname)
+    if trim_result:
+        return trim_result
+
+    # 5. KNOWN_NAMES 映射（同时检查 appname 和目录名）
     if appname in KNOWN_NAMES:
         return KNOWN_NAMES[appname]
+    if dir_name in KNOWN_NAMES:
+        return KNOWN_NAMES[dir_name]
+    # 也检查去掉 trim- 前缀的变体
+    if dir_name.startswith("trim-") or dir_name.startswith("trim."):
+        for key, name in KNOWN_NAMES.items():
+            key_base = key.replace("trim-", "").replace("trim.", "")
+            dir_base = dir_name.replace("trim-", "").replace("trim.", "")
+            if key_base == dir_base:
+                return name
 
-    # 5. 最终回退
-    readable = appname.split(".")[-1] if "." in appname else appname
+    # 6. 最终回退：目录名可读化
+    readable = dir_name if dir_name else appname
+    readable = readable.split(".")[-1] if "." in readable and len(readable.split(".")) > 2 else readable
     readable = readable.replace("-", " ").replace("_", " ").title()
     return readable
 
@@ -335,7 +420,7 @@ def static_files(filename):
 @app.route("/api/health")
 @app.route("/app/com.fntb.iconmgr/api/health")
 def health():
-    return jsonify({"status": "ok", "version": "2.5.0"})
+    return jsonify({"status": "ok", "version": "2.6.0"})
 
 
 @app.route("/api/logs")
@@ -730,7 +815,7 @@ def run_server():
         "errorlog": "-",
         "loglevel": "info",
     }
-    logger.info(f"启动 FNTB 图标管理器 v2.0 on port {port}")
+    logger.info(f"启动 FNTB 图标管理器 v2.6.0 on port {port}")
     GunicornApp(app, options).run()
 
 
