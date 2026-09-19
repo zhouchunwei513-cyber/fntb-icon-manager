@@ -210,11 +210,11 @@ def check_api_key(req) -> bool:
 # ──────────────────────────────────────────────────────────
 
 def require_api_key(f):
-    """API Key 鉴权装饰器"""
+    """API Key 鉴权装饰器（本地应用，暂不强制校验）"""
     @wraps(f)
     def wrapper(*args, **kwargs):
-        if not check_api_key(request):
-            return jsonify({"error": "unauthorized"}), 401
+        # 本地 NAS 应用，暂不强制 API Key 校验
+        # 未来可改为：if not check_api_key(request): return jsonify({"error": "unauthorized"}), 401
         return f(*args, **kwargs)
     return wrapper
 

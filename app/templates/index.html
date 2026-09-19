@@ -369,18 +369,8 @@
     </style>
 </head>
 <body>
-    <!-- Auth Screen -->
-    <div class="auth-overlay" id="authOverlay">
-        <div class="auth-box">
-            <h2>🔒 FNTB 图标管理器</h2>
-            <p>请输入 API Key 以继续</p>
-            <input type="password" id="apiKeyInput" placeholder="API Key" autocomplete="off">
-            <button class="btn btn-primary" onclick="doAuth()">进入</button>
-        </div>
-    </div>
-
     <!-- Main -->
-    <div id="mainApp" style="display:none;">
+    <div id="mainApp">
         <div class="header">
             <div class="logo">FNTB <span>图标管理器</span></div>
             <div class="actions">
@@ -472,16 +462,6 @@
             <button class="close-btn" onclick="closeModal('configModal')">&times;</button>
             <h3>⚙️ 设置</h3>
             <div id="configContent" style="margin-top:16px;"></div>
-            <div style="margin-top:16px;">
-                <h4 style="font-size:13px;margin-bottom:8px;">修改 API Key</h4>
-                <div style="display:flex;gap:8px;">
-                    <input type="password" id="newApiKeyInput" placeholder="新 API Key（8-64 位）" style="flex:1;padding:8px;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg-input);color:var(--text);font-size:13px;outline:none;">
-                    <button class="btn btn-primary btn-sm" onclick="changeApiKey()">更新</button>
-                </div>
-            </div>
-            <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">
-                <button class="btn" onclick="closeModal('configModal')">关闭</button>
-            </div>
         </div>
     </div>
 
@@ -490,54 +470,21 @@
 
     <script>
         const URL_PREFIX = "{{ url_prefix }}";
-        let apiKey = localStorage.getItem("fntb_api_key") || "";
         let currentFilter = "";
         let allApps = [];
         let replaceTarget = null; // { appname }
         let batchMode = "replace"; // "replace" | "restore"
         let batchSelectedFile = null;
 
-        // ── Auth ─────────────────────────────────────────
-        function doAuth() {
-            apiKey = document.getElementById("apiKeyInput").value.trim();
-            if (!apiKey) return;
-            localStorage.setItem("fntb_api_key", apiKey);
-            testAuth();
-        }
-
-        async function testAuth() {
-            try {
-                const resp = await fetch(`${URL_PREFIX}/api/health`);
-                if (!resp.ok) throw new Error("health check failed");
-                // Try listing apps to verify key
-                const resp2 = await fetch(`${URL_PREFIX}/api/apps`, { headers: { "X-API-Key": apiKey } });
-                if (resp2.status === 401) {
-                    toast("API Key 无效", "error");
-                    return;
-                }
-                document.getElementById("authOverlay").style.display = "none";
-                document.getElementById("mainApp").style.display = "block";
-                loadApps();
-            } catch (e) {
-                toast("连接失败: " + e.message, "error");
-            }
-        }
-
         // ── API helpers ──────────────────────────────────
-        function apiHeaders() {
-            return { "X-API-Key": apiKey };
-        }
-
         async function apiGet(path) {
-            const resp = await fetch(`${URL_PREFIX}${path}`, { headers: apiHeaders() });
-            if (resp.status === 401) { toast("鉴权失败，请重新输入 Key", "error"); return null; }
+            const resp = await fetch(`${URL_PREFIX}${path}`);
             return resp.json();
         }
 
         async function apiPost(path, body) {
             const resp = await fetch(`${URL_PREFIX}${path}`, {
                 method: "POST",
-                headers: apiHeaders(),
                 body: body,
             });
             return resp;
@@ -576,7 +523,7 @@
                 <div class="app-card">
                     <div class="card-head">
                         <div class="icon-preview">
-                            ${icon64Url ? `<img src="${icon64Url}?api_key=${apiKey}">` : '<div class="placeholder">📦</div>'}
+                            ${icon64Url ? `<img src="${icon64Url}">` : '<div class="placeholder">📦</div>'}
                         </div>
                         <div>
                             <div class="app-name">${app.name}</div>
@@ -585,11 +532,11 @@
                     </div>
                     <div class="card-icons">
                         <div class="icon-item">
-                            ${icon64Url ? `<img src="${icon64Url}?api_key=${apiKey}">` : '<div class="icon-empty">无</div>'}
+                            ${icon64Url ? `<img src="${icon64Url}">` : '<div class="icon-empty">无</div>'}
                             <div class="icon-label">64×64</div>
                         </div>
                         <div class="icon-item">
-                            ${icon256Url ? `<img src="${icon256Url}?api_key=${apiKey}">` : '<div class="icon-empty">无</div>'}
+                            ${icon256Url ? `<img src="${icon256Url}">` : '<div class="icon-empty">无</div>'}
                             <div class="icon-label">256×256</div>
                         </div>
                     </div>
@@ -774,7 +721,7 @@
                 try {
                     const resp = await fetch(`${URL_PREFIX}/api/batch/restore`, {
                         method: "POST",
-                        headers: { "X-API-Key": apiKey, "Content-Type": "application/json" },
+                        headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ apps: selected }),
                     });
                     const data = await resp.json();
@@ -800,34 +747,9 @@
             content.innerHTML = `
                 <div class="config-row"><label>最大上传大小</label><span>${data.max_upload_mb || 2} MB</span></div>
                 <div class="config-row"><label>支持的图标尺寸</label><span>${(data.icon_sizes || [64,256]).join(", ")} px</span></div>
-                <div class="config-row"><label>API Key</label><span style="font-family:monospace;">${data.api_key_masked || "未设置"}</span></div>
             `;
         }
 
-        async function changeApiKey() {
-            const newKey = document.getElementById("newApiKeyInput").value.trim();
-            if (!newKey || newKey.length < 8) {
-                toast("新 API Key 至少 8 位", "error");
-                return;
-            }
-            try {
-                const resp = await fetch(`${URL_PREFIX}/api/config/api-key`, {
-                    method: "PUT",
-                    headers: { "X-API-Key": apiKey, "Content-Type": "application/json" },
-                    body: JSON.stringify({ new_api_key: newKey }),
-                });
-                if (resp.ok) {
-                    toast("API Key 已更新，请使用新 Key 重新登录", "info");
-                    apiKey = newKey;
-                    localStorage.setItem("fntb_api_key", newKey);
-                } else {
-                    const data = await resp.json();
-                    toast(`更新失败: ${data.error}`, "error");
-                }
-            } catch (e) {
-                toast("请求失败: " + e.message, "error");
-            }
-        }
 
         // ── Modals ───────────────────────────────────────
         function openModal(id) { document.getElementById(id).classList.add("show"); }
@@ -868,15 +790,7 @@
         }
 
         // ── Init ─────────────────────────────────────────
-        if (apiKey) {
-            document.getElementById("apiKeyInput").value = apiKey;
-            testAuth();
-        }
-
-        // Enter key on auth
-        document.getElementById("apiKeyInput").addEventListener("keydown", e => {
-            if (e.key === "Enter") doAuth();
-        });
+        loadApps();
     </script>
 </body>
 </html>
