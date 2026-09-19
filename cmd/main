@@ -61,6 +61,10 @@ start)
     fi
     log_msg "Python 环境就绪: ${PYTHON_PATH}"
 
+    # ── 清除旧缓存（防止 __pycache__ 导致运行旧代码） ──
+    find "${APP_DIR}" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null
+    log_msg "已清除 __pycache__"
+
     # ── 启动服务 ──
     log_msg "启动 FNTB 图标管理器..."
     nohup "${PYTHON_PATH}" "${APP_DIR}/server.py" >> "${LOG_FILE}" 2>&1 &
