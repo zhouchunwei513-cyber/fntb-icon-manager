@@ -14,6 +14,14 @@ case $1 in
 start)
     cd "${APP_DIR}" || { echo "无法进入应用目录 ${APP_DIR}" > "${ERROR_LOG}"; exit 1; }
 
+    # ── 确保 var 目录存在（基于 TRIM_APPDEST） ──
+    if [ -n "${TRIM_PKGVAR}" ]; then
+        mkdir -p "${TRIM_PKGVAR}" 2>/dev/null
+    fi
+    mkdir -p "${APP_DIR}/var" 2>/dev/null
+    log_msg "VAR_DIR=${TRIM_PKGVAR:-${APP_DIR}/var}"
+    log_msg "APP_DIR=${APP_DIR}"
+
     # ─ 查找 Python ──
     PYTHON_BIN=""
     # 系统 PATH

@@ -22,7 +22,12 @@ from gunicorn.app.base import BaseApplication
 # ── 配置 ──────────────────────────────────────────────
 APP_NAME = "com.fntb.iconmgr"
 APP_DIR = os.environ.get("TRIM_APPDEST", os.path.dirname(os.path.abspath(__file__)))
-VAR_DIR = os.environ.get("TRIM_PKGVAR", os.path.join(APP_DIR, "var"))
+# var 目录: TRIM_PKGVAR 优先，否则基于 APP_DIR 创建
+_pkgvar = os.environ.get("TRIM_PKGVAR", "").strip()
+if _pkgvar and os.path.isdir(_pkgvar):
+    VAR_DIR = _pkgvar
+else:
+    VAR_DIR = os.path.join(APP_DIR, "var")
 # 所有 fnOS 应用安装根目录
 FNOS_APPS_ROOTS = [
     "/var/apps",                        # 标准安装路径
@@ -310,7 +315,36 @@ def static_files(filename):
 @app.route("/api/health")
 @app.route("/app/com.fntb.iconmgr/api/health")
 def health():
-    return jsonify({"status": "ok", "version": "2.0.0"})
+    return jsonify({"status": "ok", "version": "2.5.0"})
+
+
+@app.route("/api/logs")
+@app.route("/app/com.fntb.iconmgr/api/logs")
+def get_logs():
+    """查看应用日志（供前端调试使用）"""
+    log_file = request.args.get("file", "fntb.log")
+    # 安全防护：只允许读取日志文件
+    allowed_files = {"fntb.log", "server.log", "error.log"}
+    if log_file not in allowed_files:
+        return jsonify({"error": "不允许访问该文件"}), 403
+    log_path = os.path.join(VAR_DIR, log_file)
+    if not os.path.isfile(log_path):
+        return jsonify({"error": "日志文件不存在", "var_dir": VAR_DIR}), 404
+    try:
+        lines = request.args.get("lines", "200")
+        max_lines = min(int(lines), 1000)
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            all_lines = f.readlines()
+        recent = all_lines[-max_lines:]
+        return jsonify({
+            "file": log_file,
+            "var_dir": VAR_DIR,
+            "total_lines": len(all_lines),
+            "showing": len(recent),
+            "lines": [l.rstrip("\n") for l in recent],
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/apps")

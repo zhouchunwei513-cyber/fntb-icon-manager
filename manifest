@@ -1,5 +1,5 @@
 appname=com.fntb.iconmgr
-version=2.0.0
+version=2.5.0
 display_name=FNTB图标管理器
 desc=飞牛应用图标批量管理工具，支持查看所有应用图标、自定义替换、还原默认图标，提供统一图标API供客户端调用
 platform=all

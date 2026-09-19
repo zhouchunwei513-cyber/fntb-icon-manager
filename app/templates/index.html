@@ -99,6 +99,7 @@
     <div class="header">
         <div class="logo"><span>🎨</span> FNTB 图标管理器</div>
         <div class="header-actions">
+            <button class="btn" onclick="showLogs()">📋 日志</button>
             <button class="btn" onclick="showApiInfo()">📡 API</button>
             <button class="btn" onclick="refreshApps()">🔄 刷新</button>
             <button class="btn btn-primary" onclick="openBatchReplace()">📦 批量替换</button>
@@ -207,6 +208,26 @@
         </div>
     </div>
 
+    <!-- Logs Modal -->
+    <div class="modal-overlay" id="logsModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>应用日志</h3>
+                <button class="close-btn" onclick="closeModal('logsModal')">&times;</button>
+            </div>
+            <div style="margin-bottom:12px;display:flex;gap:8px;">
+                <select id="logFileSelect" onchange="loadLogs()" style="padding:8px 12px;border-radius:8px;border:1px solid #3a3a5c;background:#1a1a2e;color:#e0e0e0;font-size:14px;">
+                    <option value="fntb.log">fntb.log (启动日志)</option>
+                    <option value="server.log">server.log (服务日志)</option>
+                    <option value="error.log">error.log (错误日志)</option>
+                </select>
+                <button class="btn" onclick="loadLogs()" style="margin-left:auto;">刷新</button>
+            </div>
+            <pre id="logContent" style="background:#0d1117;padding:16px;border-radius:8px;max-height:500px;overflow-y:auto;font-size:13px;color:#7ee787;white-space:pre-wrap;word-break:break-all;margin:0;"></pre>
+            <p id="logVarDir" style="color:#888;font-size:12px;margin-top:8px;"></p>
+        </div>
+    </div>
+
 <script>
 let currentFilter = "";
 let allApps = [];
@@ -255,6 +276,31 @@ async function apiPost(path, body) {
     } catch (e) {
         toast("请求失败: " + e.message, "error");
         return null;
+    }
+}
+
+// ── Logs ──
+function showLogs() {
+    document.getElementById("logsModal").classList.add("show");
+    loadLogs();
+}
+
+async function loadLogs() {
+    const file = document.getElementById("logFileSelect").value;
+    const el = document.getElementById("logContent");
+    const dirEl = document.getElementById("logVarDir");
+    el.textContent = "加载中...";
+    try {
+        const resp = await fetch(`/api/logs?file=${file}&lines=500`);
+        const data = await resp.json();
+        if (data.error) {
+            el.textContent = `错误: ${data.error}\n\nvar 目录: ${data.var_dir || '未知'}\n\n如果日志文件不存在，说明应用刚刚启动或日志路径配置有误。`;
+        } else {
+            el.textContent = data.lines.join("\n") || "(日志为空)";
+            dirEl.textContent = `日志目录: ${data.var_dir} | 共 ${data.total_lines} 行`;
+        }
+    } catch(e) {
+        el.textContent = `请求失败: ${e.message}`;
     }
 }
 
