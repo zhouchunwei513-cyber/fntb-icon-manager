@@ -1,0 +1,129 @@
+#!/bin/bash
+# FNTB 图标管理器 v2.2 - 启停脚本
+PID_FILE="${TRIM_PKGVAR}/app.pid"
+LOG_FILE="${TRIM_PKGVAR}/fntb.log"
+APP_DIR="${TRIM_APPDEST}"
+ERROR_LOG="${TRIM_TEMP_LOGFILE}"
+
+# 确保 var 目录存在
+mkdir -p "${TRIM_PKGVAR}" 2>/dev/null
+
+log_msg() { echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}"; }
+
+case $1 in
+start)
+    cd "${APP_DIR}" || { echo "无法进入应用目录 ${APP_DIR}" > "${ERROR_LOG}"; exit 1; }
+
+    # ── 确保 var 目录存在（基于 TRIM_APPDEST） ──
+    if [ -n "${TRIM_PKGVAR}" ]; then
+        mkdir -p "${TRIM_PKGVAR}" 2>/dev/null
+    fi
+    mkdir -p "${APP_DIR}/var" 2>/dev/null
+    log_msg "VAR_DIR=${TRIM_PKGVAR:-${APP_DIR}/var}"
+    log_msg "APP_DIR=${APP_DIR}"
+
+    # ─ 查找 Python ──
+    PYTHON_BIN=""
+    # 系统 PATH
+    for p in python3 python; do
+        if command -v "$p" &>/dev/null; then PYTHON_BIN="$p"; break; fi
+    done
+    # fnOS Python 应用路径
+    if [ -z "${PYTHON_BIN}" ]; then
+        # 先检查 /var/apps 路径（fnOS 系统应用安装目录）
+        for p in /var/apps/python312/target/bin/python3.12 \
+                 /var/apps/python312/target/bin/python3 \
+                 /usr/local/bin/python3.12 \
+                 /usr/local/bin/python3; do
+            if [ -x "$p" ]; then PYTHON_BIN="$p"; break; fi
+        done
+    fi
+    if [ -z "${PYTHON_BIN}" ]; then
+        for vol in /vol1 /vol2 /vol3 /vol4; do
+            for p in "${vol}/@appcenter/python3.12/bin/python3" \
+                     "${vol}/@appcenter/python3.12/target/bin/python3" \
+                     "${vol}/@appcenter/python3/bin/python3" \
+                     "${vol}/@appcenter/python3/bin/python3.12"; do
+                if [ -x "$p" ]; then PYTHON_BIN="$p"; break 2; fi
+            done
+        done
+    fi
+    if [ -z "${PYTHON_BIN}" ]; then
+        echo "未找到 Python3，请在应用中心安装 Python 3.12" > "${ERROR_LOG}"
+        exit 1
+    fi
+    log_msg "Python: ${PYTHON_BIN} ($(${PYTHON_BIN} --version 2>&1))"
+
+    # ── 安装依赖 ──
+    VENV_DIR="${TRIM_PKGVAR}/venv"
+    if [ ! -f "${VENV_DIR}/bin/activate" ]; then
+        log_msg "创建虚拟环境..."
+        if ! ${PYTHON_BIN} -m venv "${VENV_DIR}" 2>>"${LOG_FILE}"; then
+            log_msg "venv 创建失败，尝试 pip install --user"
+            ${PYTHON_BIN} -m pip install --user -r "${APP_DIR}/requirements.txt" >> "${LOG_FILE}" 2>&1
+            PYTHON_PATH="${PYTHON_BIN}"
+        else
+            source "${VENV_DIR}/bin/activate"
+            pip install -r "${APP_DIR}/requirements.txt" >> "${LOG_FILE}" 2>&1
+            PYTHON_PATH="${VENV_DIR}/bin/python"
+        fi
+    else
+        source "${VENV_DIR}/bin/activate"
+        PYTHON_PATH="${VENV_DIR}/bin/python"
+    fi
+    log_msg "Python 环境就绪: ${PYTHON_PATH}"
+
+    # ── 清除旧缓存（防止 __pycache__ 导致运行旧代码） ──
+    find "${APP_DIR}" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null
+    log_msg "已清除 __pycache__"
+
+    # ── 启动服务 ──
+    log_msg "启动 FNTB 图标管理器..."
+    nohup "${PYTHON_PATH}" "${APP_DIR}/server.py" >> "${LOG_FILE}" 2>&1 &
+    SERVER_PID=$!
+    echo "${SERVER_PID}" > "${PID_FILE}"
+    log_msg "服务已启动 PID=${SERVER_PID}"
+
+    # ── 存活检查 ──
+    sleep 3
+    if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
+        log_msg "ERROR: 服务启动后立即退出！"
+        log_msg "--- 最近日志 ---"
+        tail -30 "${LOG_FILE}" >> "${LOG_FILE}"
+        echo "服务启动失败，请查看日志: ${LOG_FILE}" > "${ERROR_LOG}"
+        rm -f "${PID_FILE}"
+        exit 1
+    fi
+    log_msg "服务运行正常 (PID=${SERVER_PID})"
+    exit 0
+;;
+
+stop)
+    if [ -f "${PID_FILE}" ]; then
+        PID=$(cat "${PID_FILE}" | tr -d '[:space:]')
+        if [ -n "${PID}" ] && kill -0 "${PID}" 2>/dev/null; then
+            kill "${PID}" 2>/dev/null
+            sleep 2
+            kill -9 "${PID}" 2>/dev/null
+            log_msg "服务已停止 PID=${PID}"
+        fi
+        rm -f "${PID_FILE}"
+    fi
+    exit 0
+;;
+
+status)
+    if [ -f "${PID_FILE}" ]; then
+        PID=$(cat "${PID_FILE}" | tr -d '[:space:]')
+        if [ -n "${PID}" ] && kill -0 "${PID}" 2>/dev/null; then
+            exit 0
+        fi
+        rm -f "${PID_FILE}"
+    fi
+    exit 3
+;;
+
+*)
+    exit 1
+;;
+esac

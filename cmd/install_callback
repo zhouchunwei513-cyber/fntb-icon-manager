@@ -1,0 +1,18 @@
+#!/bin/bash
+# 安装后初始化
+mkdir -p "${TRIM_PKGVAR}/backup"
+mkdir -p "${TRIM_PKGVAR}"
+chmod 700 "${TRIM_PKGVAR}"
+
+# 如果 wizard 提供了 API Key，写入初始配置
+if [ -n "${wizard_api_key}" ]; then
+    cat > "${TRIM_PKGVAR}/config.json" <<EOCFG
+{
+  "api_key": "${wizard_api_key}",
+  "max_upload_mb": 2,
+  "icon_sizes": [64, 256]
+}
+EOCFG
+    chmod 600 "${TRIM_PKGVAR}/config.json"
+fi
+exit 0

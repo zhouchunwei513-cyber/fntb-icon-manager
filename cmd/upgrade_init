@@ -1,0 +1,11 @@
+#!/bin/bash
+# 升级前：清理旧版本 PID 文件
+if [ -f "${TRIM_PKGVAR}/app.pid" ]; then
+  PID=$(cat "${TRIM_PKGVAR}/app.pid" 2>/dev/null)
+  if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+    kill "$PID" 2>/dev/null
+    sleep 1
+  fi
+  rm -f "${TRIM_PKGVAR}/app.pid"
+fi
+exit 0

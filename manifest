@@ -1,0 +1,16 @@
+appname=com.fntb.iconmgr
+version=2.7.0
+display_name=FNTB图标管理器
+desc=飞牛应用图标批量管理工具，支持查看所有应用图标、自定义替换、还原默认图标，提供统一图标API供客户端调用
+platform=all
+source=thirdparty
+maintainer=fntb
+distributor=fntb
+service_port=18080
+checkport=true
+os_min_version=0.9.0
+desktop_uidir=ui
+desktop_applaunchname=com.fntb.iconmgr.Application
+ctl_stop=true
+install_type=
+changelog=v2.7.0 新增客户端兼容API(/api/client/apps)、HTTP缓存优化、快捷方式启动优化建议(与fnOS桌面一致)

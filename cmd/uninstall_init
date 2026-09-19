@@ -1,0 +1,4 @@
+#!/bin/bash
+# 卸载前清理（保留用户数据）
+rm -f "${TRIM_PKGVAR}/app.pid"
+exit 0

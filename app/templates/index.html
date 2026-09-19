@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FNTB 图标管理器</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --border: #334155;
+            --text: #f1f5f9;
+            --text-dim: #94a3b8;
+            --primary: #6366f1;
+            --success: #22c55e;
+            --danger: #ef4444;
+            --radius: 12px;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
+
+        .header { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; background: var(--card); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10; }
+        .logo { font-size: 20px; font-weight: 700; }
+        .logo span { color: var(--primary); }
+        .header-actions { display: flex; gap: 8px; }
+
+        .toolbar { display: flex; align-items: center; gap: 12px; padding: 16px 24px; flex-wrap: wrap; }
+        .search-box { flex: 1; min-width: 200px; position: relative; }
+        .search-box input { width: 100%; padding: 10px 14px 10px 36px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 14px; outline: none; }
+        .search-box::before { content: "🔍"; position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-size: 14px; }
+        .filter-btns { display: flex; gap: 4px; }
+        .filter-btn { padding: 8px 16px; border-radius: 20px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); cursor: pointer; font-size: 13px; white-space: nowrap; }
+        .filter-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+        .btn { padding: 8px 16px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--card); color: var(--text); cursor: pointer; font-size: 13px; white-space: nowrap; }
+        .btn:hover { background: var(--border); }
+        .btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+        .btn-primary:hover { opacity: 0.9; }
+        .btn-danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+
+        .stats { padding: 0 24px 8px; font-size: 13px; color: var(--text-dim); }
+
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; padding: 16px 24px; }
+
+        .app-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; transition: border-color 0.2s; }
+        .app-card:hover { border-color: var(--primary); }
+        .card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+        .icon-preview { width: 48px; height: 48px; border-radius: 10px; overflow: hidden; background: #0f172a; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .icon-preview img { width: 100%; height: 100%; object-fit: cover; }
+        .placeholder { font-size: 24px; opacity: 0.3; }
+        .app-name { font-weight: 600; font-size: 15px; line-height: 1.3; word-break: break-all; }
+        .app-version { font-size: 12px; color: var(--text-dim); }
+        .card-icons { display: flex; gap: 8px; margin-bottom: 12px; }
+        .icon-thumb { width: 56px; height: 56px; border-radius: 8px; background: #0f172a; overflow: hidden; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .icon-thumb img { width: 100%; height: 100%; object-fit: cover; }
+        .icon-thumb .label { font-size: 10px; color: var(--text-dim); text-align: center; }
+        .card-status { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-bottom: 12px; }
+        .status-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+        .badge-default { background: rgba(148,163,184,0.2); color: var(--text-dim); }
+        .badge-custom { background: rgba(99,102,241,0.2); color: var(--primary); }
+        .card-actions { display: flex; gap: 6px; }
+        .card-actions .btn { flex: 1; text-align: center; }
+
+        /* Modal */
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 100; }
+        .modal-overlay.show { display: flex; }
+        .modal { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto; position: relative; }
+        .modal h3 { font-size: 18px; margin-bottom: 16px; }
+        .close-btn { position: absolute; right: 16px; top: 16px; background: none; border: none; color: var(--text-dim); font-size: 24px; cursor: pointer; }
+        .upload-area { border: 2px dashed var(--border); border-radius: var(--radius); padding: 32px; text-align: center; cursor: pointer; margin-bottom: 16px; transition: border-color 0.2s; }
+        .upload-area:hover, .upload-area.dragover { border-color: var(--primary); }
+        .upload-area p { color: var(--text-dim); font-size: 14px; }
+        .preview-container { text-align: center; margin-bottom: 16px; }
+        .preview-container img { max-width: 200px; max-height: 200px; border-radius: var(--radius); }
+        .preview-info { font-size: 12px; color: var(--text-dim); margin-top: 8px; }
+
+        /* Toast */
+        .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 200; display: flex; flex-direction: column; gap: 8px; }
+        .toast { padding: 12px 20px; border-radius: var(--radius); font-size: 14px; animation: slideIn 0.3s ease; color: #fff; }
+        .toast-success { background: var(--success); }
+        .toast-error { background: var(--danger); }
+        .toast-info { background: var(--primary); }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+        .empty-state { grid-column: 1 / -1; text-align: center; padding: 64px; color: var(--text-dim); }
+        .empty-icon { font-size: 48px; margin-bottom: 16px; }
+
+        .batch-select { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; margin: 16px 0; max-height: 300px; overflow-y: auto; }
+        .batch-select label { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+        .batch-select label:hover { background: rgba(255,255,255,0.05); }
+        .batch-select input[type="checkbox"] { accent-color: var(--primary); }
+
+        .loading-spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="logo"><span>🎨</span> FNTB 图标管理器</div>
+        <div class="header-actions">
+            <button class="btn" id="statusIndicator" onclick="showClientStatus()" style="display:flex;align-items:center;gap:6px;">
+                <span id="statusDot" style="width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block;"></span>
+                <span id="statusText">运行中</span>
+            </button>
+            <button class="btn" onclick="showLogs()">📋 日志</button>
+            <button class="btn" onclick="showApiInfo()">📡 API</button>
+            <button class="btn" onclick="refreshApps()">🔄 刷新</button>
+            <button class="btn btn-primary" onclick="openBatchReplace()">📦 批量替换</button>
+            <button class="btn btn-danger" onclick="openBatchRestore()">↩️ 批量还原</button>
+        </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+        <div class="search-box">
+            <input type="text" id="searchInput" placeholder="搜索应用名称..." oninput="onSearch()">
+        </div>
+        <div class="filter-btns">
+            <button class="filter-btn active" data-filter="" onclick="setFilter(this)">全部</button>
+            <button class="filter-btn" data-filter="custom" onclick="setFilter(this)">已自定义</button>
+            <button class="filter-btn" data-filter="default" onclick="setFilter(this)">默认图标</button>
+        </div>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <!-- App Grid -->
+    <div class="grid" id="appGrid">
+        <div class="empty-state">
+            <div class="empty-icon">⏳</div>
+            <p>加载中...</p>
+        </div>
+    </div>
+
+    <!-- Replace Modal -->
+    <div class="modal-overlay" id="replaceModal">
+        <div class="modal">
+            <button class="close-btn" onclick="closeModal('replaceModal')">&times;</button>
+            <h3 id="replaceModalTitle">替换图标</h3>
+            <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px;" id="replaceModalApp"></p>
+            <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+                <p>点击或拖拽上传 PNG 图片</p>
+                <p style="font-size:12px;margin-top:4px;">建议尺寸 256×256，最大 2MB</p>
+            </div>
+            <div style="text-align:center;margin:12px 0;color:var(--text-dim);font-size:13px;">— 或 —</div>
+            <button class="btn" style="width:100%;margin-bottom:12px;border-style:dashed;" onclick="useDefaultIcon()">
+                 使用默认图标
+            </button>
+            <input type="file" id="fileInput" accept=".png" style="display:none" onchange="onFileSelected(this)">
+            <div class="preview-container" id="uploadPreview" style="display:none;">
+                <img id="previewImg" src="">
+                <div class="preview-info" id="previewInfo"></div>
+            </div>
+            <div style="display:flex;gap:8px;">
+                <button class="btn" style="flex:1" onclick="closeModal('replaceModal')">取消</button>
+                <button class="btn btn-primary" id="confirmReplaceBtn" style="flex:1" disabled onclick="confirmReplace()">确认替换</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Batch Modal -->
+    <div class="modal-overlay" id="batchModal">
+        <div class="modal">
+            <button class="close-btn" onclick="closeModal('batchModal')">&times;</button>
+            <h3 id="batchModalTitle">批量操作</h3>
+            <div id="batchUploadArea" style="display:none;">
+                <div class="upload-area" onclick="document.getElementById('batchFileInput').click()">
+                    <p>选择一张 PNG 作为统一图标</p>
+                </div>
+                <input type="file" id="batchFileInput" accept=".png" style="display:none" onchange="onBatchFileSelected(this)">
+                <div class="preview-container" id="batchPreview" style="display:none;">
+                    <img id="batchPreviewImg" src="" style="max-width:120px;border-radius:8px;">
+                </div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;">
+                <span style="font-size:13px;color:var(--text-dim);">选择应用</span>
+                <label style="font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer;">
+                    <input type="checkbox" id="selectAllBatch" onchange="toggleAllBatch(this.checked)"> 全选
+                </label>
+            </div>
+            <div class="batch-select" id="batchAppList"></div>
+            <div style="display:flex;gap:8px;margin-top:16px;">
+                <button class="btn" style="flex:1" onclick="closeModal('batchModal')">取消</button>
+                <button class="btn btn-primary" id="confirmBatchBtn" style="flex:1" onclick="confirmBatch()">执行</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- API Info Panel -->
+    <div class="modal-overlay" id="apiModal">
+        <div class="modal" style="max-width:680px;">
+            <button class="close-btn" onclick="closeModal('apiModal')">&times;</button>
+            <h3>客户端 API 与集成配置</h3>
+            <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px;">
+                以下 API 供飞牛 PC 客户端或其他应用调用，获取所有应用图标数据。
+            </p>
+            <!-- NAS 地址配置 -->
+            <div style="background:var(--bg);padding:12px 16px;border-radius:8px;margin-bottom:16px;">
+                <label style="font-size:13px;color:var(--text-dim);display:block;margin-bottom:6px;">飞牛 NAS 地址（用于构造客户端 URL）</label>
+                <div style="display:flex;gap:8px;">
+                    <input type="text" id="nasHostInput" placeholder="例如: 192.168.31.101:5666" style="flex:1;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:14px;font-family:monospace;outline:none;">
+                    <button class="btn btn-primary" onclick="saveNasHost()" style="white-space:nowrap;">保存</button>
+                </div>
+                <p id="nasHostStatus" style="font-size:11px;color:var(--text-dim);margin-top:4px;"></p>
+            </div>
+            <!-- API 基地址 -->
+            <div id="apiBaseUrl" style="background:var(--bg);padding:10px 16px;border-radius:8px;font-size:14px;margin-bottom:12px;word-break:break-all;cursor:pointer;user-select:all;font-family:monospace;" onclick="navigator.clipboard.writeText(this.textContent);toast('已复制','success');" title="点击复制"></div>
+            <!-- 客户端集成说明 -->
+            <div style="background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);padding:12px;border-radius:8px;margin-bottom:12px;">
+                <p style="font-size:13px;font-weight:600;margin-bottom:6px;">📡 PC 客户端集成方式</p>
+                <p style="font-size:12px;color:var(--text-dim);line-height:1.6;">
+                    1. 在 PC 客户端设置页面添加 HTTP API 地址: <code id="clientApiUrl" style="color:var(--primary);"></code><br>
+                    2. 客户端通过 <code style="color:var(--primary);">GET /api/client/apps</code> 获取应用列表（含自定义图标）<br>
+                    3. 客户端通过 <code style="color:var(--primary);">GET /api/icons/{appname}/{size}</code> 获取图标图片<br>
+                    4. 返回数据包含 <code>title</code>, <code>icon</code>, <code>protocol</code>, <code>port</code>, <code>path</code>, <code>url</code> 等字段，与 fnOS appcenter 格式兼容
+                </p>
+            </div>
+            <!-- API 端点列表 -->
+            <table style="width:100%;font-size:13px;border-collapse:collapse;">
+                <thead>
+                    <tr style="border-bottom:1px solid var(--border);">
+                        <th style="text-align:left;padding:6px;">方法</th>
+                        <th style="text-align:left;padding:6px;">路径</th>
+                        <th style="text-align:left;padding:6px;">说明</th>
+                    </tr>
+                </thead>
+                <tbody id="apiTableBody"></tbody>
+            </table>
+            <!-- 快捷方式优化建议 -->
+            <div style="background:rgba(234,179,8,0.1);border:1px solid rgba(234,179,8,0.3);padding:12px;border-radius:8px;margin-top:12px;">
+                <p style="font-size:13px;font-weight:600;margin-bottom:6px;">⚡ 快捷方式启动优化建议</p>
+                <p style="font-size:12px;color:var(--text-dim);line-height:1.6;">
+                    <strong>问题:</strong> 通过快捷方式打开第三方应用需等待约 15-20 秒。<br>
+                    <strong>原因:</strong> PC 客户端对非 appview 类型应用会触发 preauth 预认证流程，等待 20s 超时后才加载页面。<br>
+                    <strong>解决:</strong> fnOS 内置应用（trim.*）使用 appview 类型，无此延迟（约 3-7s）。建议为内置应用创建快捷方式。
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Client Connection Status Modal -->
+    <div class="modal-overlay" id="statusModal">
+        <div class="modal" style="max-width:620px;">
+            <button class="close-btn" onclick="closeModal('statusModal')">&times;</button>
+            <h3>📊 客户端连接状态</h3>
+            <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px;">服务运行状态与客户端连接信息</p>
+
+            <!-- 服务状态卡片 -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
+                <div style="background:var(--bg);padding:12px;border-radius:8px;">
+                    <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">服务状态</div>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <span id="csStatusDot" style="width:10px;height:10px;border-radius:50%;background:#22c55e;display:inline-block;"></span>
+                        <span id="csStatus" style="font-size:15px;font-weight:600;color:#22c55e;">运行中</span>
+                    </div>
+                </div>
+                <div style="background:var(--bg);padding:12px;border-radius:8px;">
+                    <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">版本号</div>
+                    <div id="csVersion" style="font-size:15px;font-weight:600;">v2.7.0</div>
+                </div>
+                <div style="background:var(--bg);padding:12px;border-radius:8px;">
+                    <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">监听端口</div>
+                    <div id="csPort" style="font-size:15px;font-weight:600;">18080</div>
+                </div>
+                <div style="background:var(--bg);padding:12px;border-radius:8px;">
+                    <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">运行时间</div>
+                    <div id="csUptime" style="font-size:15px;font-weight:600;">-</div>
+                </div>
+            </div>
+
+            <!-- API 与 CORS 状态 -->
+            <div style="background:var(--bg);padding:12px 16px;border-radius:8px;margin-bottom:16px;">
+                <div style="font-size:13px;font-weight:600;margin-bottom:8px;">🔌 接口与跨域</div>
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <span style="font-size:13px;color:var(--text-dim);">API 可访问性</span>
+                        <span id="csApiAccessible" style="font-size:13px;color:#22c55e;">✓ 正常</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <span style="font-size:13px;color:var(--text-dim);">CORS 跨域</span>
+                        <span id="csCors" style="font-size:13px;color:#22c55e;">✓ 已启用 (Allow-Origin: *)</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <span style="font-size:13px;color:var(--text-dim);">已追踪请求数</span>
+                        <span id="csTotalRequests" style="font-size:13px;">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 最近客户端请求 -->
+            <div style="background:var(--bg);padding:12px 16px;border-radius:8px;margin-bottom:12px;">
+                <div style="font-size:13px;font-weight:600;margin-bottom:8px;">🕐 最近客户端请求</div>
+                <div id="csRecentRequests" style="max-height:200px;overflow-y:auto;">
+                    <p style="font-size:12px;color:var(--text-dim);">暂无请求记录</p>
+                </div>
+            </div>
+
+            <!-- 最后请求详情 -->
+            <div id="csLastRequestSection" style="background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);padding:12px;border-radius:8px;display:none;">
+                <div style="font-size:13px;font-weight:600;margin-bottom:6px;">📍 最后一次请求</div>
+                <div id="csLastRequest" style="font-size:12px;color:var(--text-dim);line-height:1.6;"></div>
+            </div>
+
+            <div style="margin-top:12px;text-align:right;">
+                <button class="btn" onclick="refreshStatus()">🔄 刷新状态</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Logs Modal -->
+    <div class="modal-overlay" id="logsModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>应用日志</h3>
+                <button class="close-btn" onclick="closeModal('logsModal')">&times;</button>
+            </div>
+            <div style="margin-bottom:12px;display:flex;gap:8px;">
+                <select id="logFileSelect" onchange="loadLogs()" style="padding:8px 12px;border-radius:8px;border:1px solid #3a3a5c;background:#1a1a2e;color:#e0e0e0;font-size:14px;">
+                    <option value="fntb.log">fntb.log (启动日志)</option>
+                    <option value="server.log">server.log (服务日志)</option>
+                    <option value="error.log">error.log (错误日志)</option>
+                </select>
+                <button class="btn" onclick="loadLogs()" style="margin-left:auto;">刷新</button>
+                <button class="btn" onclick="exportLogs()" style="background:#2d6a4f;">导出</button>
+            </div>
+            <pre id="logContent" style="background:#0d1117;padding:16px;border-radius:8px;max-height:500px;overflow-y:auto;font-size:13px;color:#7ee787;white-space:pre-wrap;word-break:break-all;margin:0;"></pre>
+            <p id="logVarDir" style="color:#888;font-size:12px;margin-top:8px;"></p>
+        </div>
+    </div>
+
+<script>
+let currentFilter = "";
+let allApps = [];
+let replaceTarget = null;
+let batchMode = "replace";
+let batchSelectedFile = null;
+let batchApps = []; // full app list for batch selection
+
+// ── API Info ──
+const API_ENDPOINTS = [
+    { method: "GET", path: "/api/client/apps", desc: "客户端兼容应用列表（含图标URL、protocol、port等）" },
+    { method: "GET", path: "/api/client/status", desc: "客户端连接状态（服务状态/最近请求/CORS）" },
+    { method: "GET", path: "/api/icons", desc: "获取所有应用图标状态列表" },
+    { method: "GET", path: "/api/icons/{appname}/{size}", desc: "获取指定应用图标（64/128/256/512）" },
+    { method: "GET", path: "/api/apps", desc: "获取完整应用列表（含元信息）" },
+    { method: "GET", path: "/api/health", desc: "健康检查" },
+    { method: "POST", path: "/api/apps/{name}/icon", desc: "上传自定义图标" },
+    { method: "POST", path: "/api/apps/{name}/icon/restore", desc: "还原默认图标" },
+];
+
+// 检测当前访问的基础路径（支持 NAS 反向代理）
+function getBasePath() {
+    const path = window.location.pathname;
+    // 如果通过 /app/com.fntb.iconmgr 访问，返回该前缀
+    if (path.startsWith("/app/com.fntb.iconmgr")) {
+        return "/app/com.fntb.iconmgr";
+    }
+    return "";
+}
+
+function saveNasHost() {
+    const val = document.getElementById("nasHostInput").value.trim();
+    if (val) {
+        localStorage.setItem("nas_host", val);
+        document.getElementById("nasHostStatus").textContent = "已保存: " + val;
+        document.getElementById("nasHostStatus").style.color = "var(--success)";
+        toast("NAS 地址已保存", "success");
+    } else {
+        localStorage.removeItem("nas_host");
+        document.getElementById("nasHostStatus").textContent = "已清除";
+    }
+    updateApiBaseUrl();
+}
+
+function updateApiBaseUrl() {
+    const baseUrl = window.location.origin;
+    const basePath = getBasePath();
+    const nasHost = localStorage.getItem("nas_host") || "";
+    let apiUrl;
+    if (nasHost) {
+        apiUrl = `http://${nasHost}${basePath}/api/client/apps?nas_host=${nasHost}`;
+    } else {
+        apiUrl = `${baseUrl}${basePath}/api/client/apps`;
+    }
+    document.getElementById("apiBaseUrl").textContent = apiUrl;
+    document.getElementById("clientApiUrl").textContent = apiUrl;
+    document.getElementById("nasHostInput").value = nasHost;
+    if (nasHost) {
+        document.getElementById("nasHostStatus").textContent = "已保存: " + nasHost;
+        document.getElementById("nasHostStatus").style.color = "var(--success)";
+    }
+}
+
+function showApiInfo() {
+    updateApiBaseUrl();
+    const basePath = getBasePath();
+    const tbody = document.getElementById("apiTableBody");
+    tbody.innerHTML = API_ENDPOINTS.map(e => {
+        // 显示带基础路径的完整路径（NAS 反代场景）
+        const displayPath = basePath ? basePath + e.path : e.path;
+        return `<tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:8px;"><code style="color:var(--primary);">${e.method}</code></td>
+            <td style="padding:8px;"><code>${displayPath}</code></td>
+            <td style="padding:8px;color:var(--text-dim);">${e.desc}</td>
+        </tr>`;
+    }).join("");
+
+    // 显示当前访问模式提示
+    let proxyHint = document.getElementById("proxyHint");
+    if (!proxyHint) {
+        proxyHint = document.createElement("div");
+        proxyHint.id = "proxyHint";
+        proxyHint.style.cssText = "background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);padding:10px;border-radius:8px;margin-top:12px;";
+        const modal = document.querySelector("#apiModal .modal");
+        const shortcutTip = modal.querySelector("div[style*='rgba(234,179,8']");
+        if (shortcutTip) {
+            shortcutTip.after(proxyHint);
+        } else {
+            modal.appendChild(proxyHint);
+        }
+    }
+    if (basePath) {
+        proxyHint.style.display = "block";
+        proxyHint.innerHTML = `<p style="font-size:13px;font-weight:600;margin-bottom:4px;">🔗 当前通过反向代理访问</p>
+            <p style="font-size:12px;color:var(--text-dim);">检测到基础路径: <code style="color:var(--primary);">${basePath}</code>，API 路径已自动适配。客户端集成时请使用上方完整路径。</p>`;
+    } else {
+        proxyHint.style.display = "none";
+    }
+
+    document.getElementById("apiModal").classList.add("show");
+}
+
+// ── API helpers ──
+async function apiGet(path) {
+    try {
+        const basePath = getBasePath();
+        const fullPath = basePath + path;
+        const resp = await fetch(fullPath);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        return resp.json();
+    } catch (e) {
+        toast("请求失败: " + e.message, "error");
+        return null;
+    }
+}
+
+async function apiPost(path, body) {
+    try {
+        const basePath = getBasePath();
+        const fullPath = basePath + path;
+        const resp = await fetch(fullPath, { method: "POST", body });
+        return resp;
+    } catch (e) {
+        toast("请求失败: " + e.message, "error");
+        return null;
+    }
+}
+
+// ── Logs ──
+function showLogs() {
+    document.getElementById("logsModal").classList.add("show");
+    loadLogs();
+}
+
+async function loadLogs() {
+    const file = document.getElementById("logFileSelect").value;
+    const el = document.getElementById("logContent");
+    const dirEl = document.getElementById("logVarDir");
+    el.textContent = "加载中...";
+    try {
+        const basePath = getBasePath();
+        const resp = await fetch(`${basePath}/api/logs?file=${file}&lines=500`);
+        const data = await resp.json();
+        if (data.error) {
+            el.textContent = `错误: ${data.error}\n\nvar 目录: ${data.var_dir || '未知'}\n\n如果日志文件不存在，说明应用刚刚启动或日志路径配置有误。`;
+            dirEl.textContent = "";
+        } else {
+            el.textContent = data.lines.join("\n") || "(日志为空)";
+            dirEl.textContent = `日志目录: ${data.var_dir} | 共 ${data.total_lines} 行`;
+        }
+    } catch(e) {
+        el.textContent = `请求失败: ${e.message}`;
+        dirEl.textContent = "";
+    }
+}
+
+async function exportLogs() {
+    const file = document.getElementById("logFileSelect").value;
+    try {
+        const basePath = getBasePath();
+        const resp = await fetch(`${basePath}/api/logs?file=${file}&lines=10000`);
+        const data = await resp.json();
+        if (data.error) { alert("导出失败: " + data.error); return; }
+        const content = data.lines.join("\n");
+        const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${file.replace(".log","")}_${new Date().toISOString().slice(0,19).replace(/:/g,"-")}.log`;
+        a.click();
+        URL.revokeObjectURL(url);
+    } catch(e) {
+        alert("导出失败: " + e.message);
+    }
+}
+
+// ── Load apps ──
+async function loadApps() {
+    let path = "/api/apps";
+    const params = [];
+    if (currentFilter) params.push(`status=${currentFilter}`);
+    const q = document.getElementById("searchInput").value.trim();
+    if (q) params.push(`q=${encodeURIComponent(q)}`);
+    if (params.length) path += "?" + params.join("&");
+
+    const data = await apiGet(path);
+    if (!data) return;
+    allApps = data.apps || [];
+    document.getElementById("stats").textContent = `共 ${data.total} 个应用`;
+    renderApps();
+}
+
+function renderApps() {
+    const grid = document.getElementById("appGrid");
+    if (!allApps.length) {
+        grid.innerHTML = `<div class="empty-state"><div class="empty-icon">📂</div><p>没有找到应用</p></div>`;
+        return;
+    }
+    grid.innerHTML = allApps.map(a => {
+        const basePath = getBasePath();
+        const iconUrl64 = `${basePath}/api/apps/${encodeURIComponent(a.name)}/icon/64`;
+        const iconUrl256 = `${basePath}/api/apps/${encodeURIComponent(a.name)}/icon/256`;
+        const statusBadge = a.has_custom_icon
+            ? '<span class="status-badge badge-custom">● 已自定义</span>'
+            : '<span class="status-badge badge-default">○ 默认</span>';
+        return `
+        <div class="app-card">
+            <div class="card-head">
+                <div class="icon-preview">
+                    ${a.icons["64"] ? `<img src="${iconUrl64}" loading="lazy">` : '<div class="placeholder">📦</div>'}
+                </div>
+                <div style="min-width:0;">
+                    <div class="app-name">${escHtml(a.display_name || a.name)}</div>
+                    <div class="app-version">${escHtml(a.name)}${a.version ? ' v' + escHtml(a.version) : ''}</div>
+                </div>
+            </div>
+            <div class="card-icons">
+                <div class="icon-thumb">
+                    ${a.icons["64"] ? `<img src="${iconUrl64}" loading="lazy">` : '<div class="label">无</div>'}
+                </div>
+                <div class="icon-thumb">
+                    ${a.icons["256"] ? `<img src="${iconUrl256}" loading="lazy">` : '<div class="label">无</div>'}
+                </div>
+            </div>
+            <div class="card-status">${statusBadge}</div>
+            <div class="card-actions">
+                <button class="btn btn-primary" onclick="openReplace('${escAttr(a.name)}')">🖼️ 替换</button>
+                <button class="btn" onclick="restoreIcon('${escAttr(a.name)}')" ${!a.has_custom_icon ? 'disabled style="opacity:0.4"' : ''}>↩️ 还原</button>
+            </div>
+        </div>`;
+    }).join("");
+}
+
+function escHtml(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function escAttr(s) { return (s || '').replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
+
+// ── Search & Filter ──
+let searchTimer;
+function onSearch() { clearTimeout(searchTimer); searchTimer = setTimeout(loadApps, 300); }
+
+function setFilter(btn) {
+    document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    currentFilter = btn.dataset.filter;
+    loadApps();
+}
+
+function refreshApps() {
+    apiGet("/api/refresh").then(() => { loadApps(); toast("已刷新", "success"); });
+}
+
+// ─ Replace ──
+function openReplace(appname) {
+    replaceTarget = { appname };
+    document.getElementById("replaceModalApp").textContent = `应用: ${appname}`;
+    document.getElementById("uploadPreview").style.display = "none";
+    document.getElementById("confirmReplaceBtn").disabled = true;
+    document.getElementById("fileInput").value = "";
+    openModal("replaceModal");
+}
+
+function onFileSelected(input) {
+    const file = input.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { toast("文件超过 2MB", "error"); input.value = ""; return; }
+    const reader = new FileReader();
+    reader.onload = e => {
+        document.getElementById("previewImg").src = e.target.result;
+        document.getElementById("previewInfo").textContent = `${file.name} (${(file.size/1024).toFixed(1)} KB)`;
+        document.getElementById("uploadPreview").style.display = "block";
+        document.getElementById("confirmReplaceBtn").disabled = false;
+    };
+    reader.readAsDataURL(file);
+}
+
+async function confirmReplace() {
+    if (!replaceTarget) return;
+    const file = document.getElementById("fileInput").files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append("file", file);
+    const btn = document.getElementById("confirmReplaceBtn");
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading-spinner"></span> 处理中...';
+    try {
+        const resp = await apiPost(`/api/apps/${encodeURIComponent(replaceTarget.appname)}/icon`, fd);
+        const data = await resp.json();
+        if (resp.ok) { toast("图标替换成功", "success"); closeModal("replaceModal"); loadApps(); }
+        else toast(`替换失败: ${data.error}`, "error");
+    } catch(e) { toast("请求失败: " + e.message, "error"); }
+    btn.disabled = false;
+    btn.textContent = "确认替换";
+}
+
+async function useDefaultIcon() {
+    if (!replaceTarget) return;
+    try {
+        const resp = await apiPost(`/api/apps/${encodeURIComponent(replaceTarget.appname)}/icon/restore`);
+        const data = await resp.json();
+        if (resp.ok) { toast("已切换为默认图标", "success"); closeModal("replaceModal"); loadApps(); }
+        else toast(`操作失败: ${data.error}`, "error");
+    } catch(e) { toast("请求失败: " + e.message, "error"); }
+}
+
+async function restoreIcon(appname) {
+    if (!confirm(`确定还原 ${appname} 的图标？`)) return;
+    try {
+        const resp = await apiPost(`/api/apps/${encodeURIComponent(appname)}/icon/restore`);
+        const data = await resp.json();
+        if (resp.ok) { toast(`${appname} 图标已还原`, "success"); loadApps(); }
+        else toast(`还原失败: ${data.error}`, "error");
+    } catch(e) { toast("请求失败: " + e.message, "error"); }
+}
+
+// ── Batch ──
+async function openBatchReplace() {
+    batchMode = "replace";
+    batchSelectedFile = null;
+    document.getElementById("batchModalTitle").textContent = "批量替换图标";
+    document.getElementById("batchUploadArea").style.display = "block";
+    document.getElementById("batchPreview").style.display = "none";
+    document.getElementById("batchFileInput").value = "";
+    await loadBatchAppList();
+    openModal("batchModal");
+}
+
+async function openBatchRestore() {
+    batchMode = "restore";
+    batchSelectedFile = null;
+    document.getElementById("batchModalTitle").textContent = "批量还原图标";
+    document.getElementById("batchUploadArea").style.display = "none";
+    await loadBatchAppList();
+    openModal("batchModal");
+}
+
+async function loadBatchAppList() {
+    const data = await apiGet("/api/apps?status=custom&limit=200");
+    const apps = (data && data.apps) || allApps;
+    const list = document.getElementById("batchAppList");
+    list.innerHTML = apps.map(a => `
+        <label><input type="checkbox" class="batch-cb" value="${escAttr(a.name)}"> ${escHtml(a.display_name || a.name)}</label>
+    `).join("");
+    document.getElementById("selectAllBatch").checked = false;
+}
+
+function toggleAllBatch(checked) {
+    document.querySelectorAll(".batch-cb").forEach(cb => cb.checked = checked);
+}
+
+function onBatchFileSelected(input) {
+    const file = input.files[0];
+    if (!file) return;
+    batchSelectedFile = file;
+    const reader = new FileReader();
+    reader.onload = e => {
+        document.getElementById("batchPreviewImg").src = e.target.result;
+        document.getElementById("batchPreview").style.display = "block";
+    };
+    reader.readAsDataURL(file);
+}
+
+async function confirmBatch() {
+    const selected = Array.from(document.querySelectorAll(".batch-cb:checked")).map(cb => cb.value);
+    if (!selected.length) { toast("请先选择应用", "error"); return; }
+    const btn = document.getElementById("confirmBatchBtn");
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading-spinner"></span> 执行中...';
+    try {
+        if (batchMode === "replace") {
+            if (!batchSelectedFile) { toast("请先选择图片", "error"); btn.disabled = false; btn.textContent = "执行"; return; }
+            const fd = new FormData();
+            fd.append("file", batchSelectedFile);
+            selected.forEach(n => fd.append("apps", n));
+            const resp = await apiPost("/api/apps/batch/replace", fd);
+            const data = await resp.json();
+            if (resp.ok) { toast(`批量替换完成 (${data.success}/${selected.length})`, "success"); closeModal("batchModal"); loadApps(); }
+            else toast(`失败: ${data.error}`, "error");
+        } else {
+            const resp = await apiPost("/api/apps/batch/restore", JSON.stringify({ apps: selected }), );
+            const data = await resp.json();
+            if (resp.ok) { toast(`批量还原完成 (${data.count})`, "success"); closeModal("batchModal"); loadApps(); }
+            else toast(`失败: ${data.error}`, "error");
+        }
+    } catch(e) { toast("请求失败: " + e.message, "error"); }
+    btn.disabled = false;
+    btn.textContent = "执行";
+}
+
+// ── Modals ──
+function openModal(id) { document.getElementById(id).classList.add("show"); }
+function closeModal(id) { document.getElementById(id).classList.remove("show"); }
+document.querySelectorAll(".modal-overlay").forEach(o => o.addEventListener("click", e => { if (e.target === o) o.classList.remove("show"); }));
+
+// ── Toast ──
+function toast(msg, type = "info") {
+    const el = document.createElement("div");
+    el.className = `toast toast-${type}`;
+    el.textContent = msg;
+    document.getElementById("toastContainer").appendChild(el);
+    setTimeout(() => el.remove(), 4000);
+}
+
+// ── Drag & drop ──
+const ua = document.getElementById("uploadArea");
+if (ua) {
+    ua.addEventListener("dragover", e => { e.preventDefault(); ua.classList.add("dragover"); });
+    ua.addEventListener("dragleave", () => ua.classList.remove("dragover"));
+    ua.addEventListener("drop", e => {
+        e.preventDefault(); ua.classList.remove("dragover");
+        const f = e.dataTransfer.files[0];
+        if (f && f.type === "image/png") { const dt = new DataTransfer(); dt.items.add(f); document.getElementById("fileInput").files = dt.files; onFileSelected(document.getElementById("fileInput")); }
+    });
+}
+
+// ── Client Connection Status ──
+function showClientStatus() {
+    document.getElementById("statusModal").classList.add("show");
+    refreshStatus();
+}
+
+async function refreshStatus() {
+    try {
+        const basePath = getBasePath();
+        const resp = await fetch(`${basePath}/api/client/status`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+
+        // 服务状态
+        const statusDot = document.getElementById("csStatusDot");
+        const statusText = document.getElementById("csStatus");
+        const headerDot = document.getElementById("statusDot");
+        const headerText = document.getElementById("statusText");
+
+        if (data.status === "running") {
+            statusDot.style.background = "#22c55e";
+            statusText.textContent = "运行中";
+            statusText.style.color = "#22c55e";
+            headerDot.style.background = "#22c55e";
+            headerText.textContent = "运行中";
+        } else {
+            statusDot.style.background = "#ef4444";
+            statusText.textContent = "异常";
+            statusText.style.color = "#ef4444";
+            headerDot.style.background = "#ef4444";
+            headerText.textContent = "异常";
+        }
+
+        document.getElementById("csVersion").textContent = "v" + data.version;
+        document.getElementById("csPort").textContent = data.port;
+        document.getElementById("csUptime").textContent = data.uptime;
+        document.getElementById("csTotalRequests").textContent = data.total_requests_tracked;
+
+        // API 可访问性
+        const apiEl = document.getElementById("csApiAccessible");
+        if (data.api_accessible) {
+            apiEl.textContent = "✓ 正常";
+            apiEl.style.color = "#22c55e";
+        } else {
+            apiEl.textContent = "✗ 异常";
+            apiEl.style.color = "#ef4444";
+        }
+
+        // CORS 状态
+        const corsEl = document.getElementById("csCors");
+        if (data.cors_enabled) {
+            corsEl.textContent = `✓ 已启用 (Allow-Origin: ${data.cors_allow_origin})`;
+            corsEl.style.color = "#22c55e";
+        } else {
+            corsEl.textContent = "✗ 未启用";
+            corsEl.style.color = "#ef4444";
+        }
+
+        // 最近请求列表
+        const recentEl = document.getElementById("csRecentRequests");
+        if (data.recent_requests && data.recent_requests.length > 0) {
+            recentEl.innerHTML = data.recent_requests.map(r => `
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">
+                    <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1;">
+                        <span style="color:var(--primary);font-family:monospace;font-size:11px;white-space:nowrap;">${escHtml(r.method)} ${escHtml(r.path)}</span>
+                    </div>
+                    <div style="display:flex;gap:12px;flex-shrink:0;margin-left:12px;">
+                        <span style="color:var(--text-dim);">${escHtml(r.ip)}</span>
+                        <span style="color:var(--text-dim);">${escHtml(r.time)}</span>
+                    </div>
+                </div>
+            `).join("");
+        } else {
+            recentEl.innerHTML = '<p style="font-size:12px;color:var(--text-dim);">暂无请求记录</p>';
+        }
+
+        // 最后请求详情
+        const lastSection = document.getElementById("csLastRequestSection");
+        const lastEl = document.getElementById("csLastRequest");
+        if (data.last_request) {
+            const lr = data.last_request;
+            lastSection.style.display = "block";
+            lastEl.innerHTML = `
+                <div><strong>来源 IP:</strong> ${escHtml(lr.ip)}</div>
+                <div><strong>时间:</strong> ${escHtml(lr.time)}</div>
+                <div><strong>请求:</strong> ${escHtml(lr.method)} ${escHtml(lr.path)}</div>
+                <div><strong>User-Agent:</strong> ${escHtml(lr.user_agent)}</div>
+            `;
+        } else {
+            lastSection.style.display = "none";
+        }
+    } catch (e) {
+        const statusDot = document.getElementById("csStatusDot");
+        const statusText = document.getElementById("csStatus");
+        statusDot.style.background = "#ef4444";
+        statusText.textContent = "连接失败";
+        statusText.style.color = "#ef4444";
+        toast("获取状态失败: " + e.message, "error");
+    }
+}
+
+// ── Init ──
+loadApps();
+</script>
+</body>
+</html>
