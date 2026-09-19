@@ -11,4 +11,4 @@ os_min_version=1.0.0
 desktop_uidir=ui
 desktop_applaunchname=com.fntb.icon.manager.main
 ctl_stop=true
-install_type=root
+install_type=
