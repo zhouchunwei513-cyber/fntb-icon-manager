@@ -44,7 +44,7 @@ PKG_VAR = Path(os.environ.get("TRIM_PKGVAR", APP_DIR.parent / "var"))
 BACKUP_DIR = PKG_VAR / "backup"
 CONFIG_FILE = PKG_VAR / "config.json"
 APPCENTER_ROOT = Path("/var/packages")              # 飞牛应用安装根目录
-URL_PREFIX = os.environ.get("URL_PREFIX", "/app/com.fntb.icon.manager")
+URL_PREFIX = os.environ.get("URL_PREFIX", "/app/com.fntb.iconmgr")
 
 # 允许的图标尺寸
 ALLOWED_SIZES = [64, 256]

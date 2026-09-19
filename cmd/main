@@ -2,7 +2,7 @@
 # FNTB 图标管理器 - 启停控制脚本
 PID_FILE="${TRIM_PKGVAR}/app.pid"
 LOG_FILE="${TRIM_TEMP_LOGFILE:-${TRIM_PKGVAR}/fntb.log}"
-APP_DIR="${TRIM_APPDEST}/app"
+APP_DIR="${TRIM_APPDEST}"
 
 case $1 in
 start)
@@ -20,7 +20,7 @@ start)
     fi
     export FNTB_PORT="${wizard_service_port:-${TRIM_SERVICE_PORT:-18080}}"
     export TRIM_PKGVAR="${TRIM_PKGVAR}"
-    export URL_PREFIX="/app/com.fntb.icon.manager"
+    export URL_PREFIX="/app/com.fntb.iconmgr"
 
     # 直接启动 gunicorn（单 worker 避免配置读写竞态 S2）
     nohup venv/bin/gunicorn \
