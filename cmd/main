@@ -1,245 +1,102 @@
 #!/bin/bash
-# FNTB 图标管理器 - 启停控制脚本
+# FNTB 图标管理器 v2.0 - 启停脚本
 PID_FILE="${TRIM_PKGVAR}/app.pid"
 LOG_FILE="${TRIM_PKGVAR}/fntb.log"
 APP_DIR="${TRIM_APPDEST}"
+ERROR_LOG="${TRIM_TEMP_LOGFILE}"
 
-log_msg() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}"
-}
-
-# 查找 Python3 二进制
-find_python() {
-    # 1. 系统 PATH
-    for p in python3.12 python3.11 python3.10 python3.9 python3 python; do
-        if command -v "$p" &>/dev/null; then
-            echo "$(command -v "$p")"
-            return 0
-        fi
-    done
-
-    # 2. fnOS 应用安装路径 (常见位置)
-    local search_paths=(
-        "/vol1/@appcenter/python3.12/bin/python3"
-        "/vol1/@appcenter/python3.12/bin/python3.12"
-        "/vol2/@appcenter/python3.12/bin/python3"
-        "/vol2/@appcenter/python3.12/bin/python3.12"
-        "/vol3/@appcenter/python3.12/bin/python3"
-        "/vol3/@appcenter/python3.12/bin/python3.12"
-        "/usr/local/bin/python3"
-        "/usr/bin/python3"
-        "/opt/python3/bin/python3"
-    )
-    for sp in "${search_paths[@]}"; do
-        if [ -x "$sp" ]; then
-            echo "$sp"
-            return 0
-        fi
-    done
-
-    # 3. 全盘搜索 (限制深度)
-    for vol in /vol1 /vol2 /vol3 /volume1 /volume2; do
-        if [ -d "${vol}/@appcenter" ]; then
-            local found
-            found=$(find "${vol}/@appcenter" -maxdepth 4 -name "python3*" -type f 2>/dev/null | head -5)
-            if [ -n "$found" ]; then
-                while IFS= read -r candidate; do
-                    if "$candidate" --version &>/dev/null; then
-                        echo "$candidate"
-                        return 0
-                    fi
-                done <<< "$found"
-            fi
-        fi
-    done
-
-    return 1
-}
+log_msg() { echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}"; }
 
 case $1 in
 start)
-    log_msg "=== FNTB 图标管理器启动 ==="
-    log_msg "APP_DIR=${APP_DIR}"
-    log_msg "TRIM_PKGVAR=${TRIM_PKGVAR}"
-    log_msg "TRIM_SERVICE_PORT=${TRIM_SERVICE_PORT}"
+    cd "${APP_DIR}" || { echo "无法进入应用目录 ${APP_DIR}" > "${ERROR_LOG}"; exit 1; }
 
-    cd "${APP_DIR}" || { log_msg "ERROR: 无法进入应用目录 ${APP_DIR}"; exit 1; }
-
-    # 查找 Python3
-    log_msg "搜索 Python3..."
-    PYTHON_BIN=$(find_python)
+    # ─ 查找 Python ──
+    PYTHON_BIN=""
+    # 系统 PATH
+    for p in python3 python; do
+        if command -v "$p" &>/dev/null; then PYTHON_BIN="$p"; break; fi
+    done
+    # fnOS Python 应用路径
     if [ -z "${PYTHON_BIN}" ]; then
-        log_msg "ERROR: 未找到 Python3，请在 fnOS 应用中心安装 Python 3.x"
-        log_msg "搜索范围: PATH + /vol*/@appcenter/python*/bin/"
-        exit 1
-    fi
-
-    log_msg "找到 Python: ${PYTHON_BIN}"
-    log_msg "Python 版本: $(${PYTHON_BIN} --version 2>&1)"
-    log_msg "Python 位置: $(ls -la "${PYTHON_BIN}" 2>&1 | head -1)"
-
-    # 检查 pip 是否可用
-    PIP_BIN=""
-    PYTHON_DIR=$(dirname "${PYTHON_BIN}")
-
-    # 尝试同目录下的 pip
-    if [ -x "${PYTHON_DIR}/pip3" ]; then
-        PIP_BIN="${PYTHON_DIR}/pip3"
-    elif [ -x "${PYTHON_DIR}/pip" ]; then
-        PIP_BIN="${PYTHON_DIR}/pip"
-    fi
-
-    # 用 python -m pip
-    if [ -z "${PIP_BIN}" ] && ${PYTHON_BIN} -m pip --version &>/dev/null; then
-        PIP_BIN="${PYTHON_BIN} -m pip"
-    fi
-
-    if [ -z "${PIP_BIN}" ]; then
-        log_msg "ERROR: pip 不可用，尝试用 ensurepip..."
-        ${PYTHON_BIN} -m ensurepip --upgrade >> "${LOG_FILE}" 2>&1
-        if ${PYTHON_BIN} -m pip --version &>/dev/null; then
-            PIP_BIN="${PYTHON_BIN} -m pip"
-            log_msg "ensurepip 成功"
-        else
-            log_msg "ERROR: 无法获取 pip，安装失败"
-            exit 1
-        fi
-    fi
-
-    log_msg "pip 路径: ${PIP_BIN}"
-
-    # 创建虚拟环境
-    USE_VENV=false
-    VENV_DIR="${TRIM_PKGVAR}/venv"
-    if [ -f "${VENV_DIR}/bin/python" ]; then
-        USE_VENV=true
-        log_msg "使用已有虚拟环境: ${VENV_DIR}"
-    else
-        log_msg "创建虚拟环境: ${VENV_DIR}"
-        if ${PYTHON_BIN} -m venv "${VENV_DIR}" >> "${LOG_FILE}" 2>&1; then
-            USE_VENV=true
-            log_msg "虚拟环境创建成功"
-        else
-            log_msg "ERROR: 虚拟环境创建失败"
-            log_msg "详细错误:"
-            ${PYTHON_BIN} -m venv "${VENV_DIR}" >> "${LOG_FILE}" 2>&1
-            exit 1
-        fi
-    fi
-
-    # 安装依赖
-    if [ "${USE_VENV}" = true ]; then
-        log_msg "安装 Python 依赖 (flask, pillow, gunicorn, flask-cors)..."
-        "${VENV_DIR}/bin/pip" install --no-cache-dir -r "${APP_DIR}/requirements.txt" >> "${LOG_FILE}" 2>&1
-        PIP_RESULT=$?
-        if [ ${PIP_RESULT} -ne 0 ]; then
-            log_msg "ERROR: 依赖安装失败 (exit code: ${PIP_RESULT})"
-            log_msg "=== pip 输出 ==="
-            tail -20 "${LOG_FILE}" >> "${LOG_FILE}"
-            exit 1
-        fi
-        log_msg "依赖安装成功"
-        log_msg "已安装包:"
-        "${VENV_DIR}/bin/pip" list >> "${LOG_FILE}" 2>&1
-        GUNICORN="${VENV_DIR}/bin/gunicorn"
-    fi
-
-    # 配置环境变量
-    export FNTB_PORT="${wizard_service_port:-${TRIM_SERVICE_PORT:-18080}}"
-    export TRIM_PKGVAR="${TRIM_PKGVAR}"
-    export URL_PREFIX="/app/com.fntb.iconmgr"
-
-    if [ -n "${wizard_api_key}" ]; then
-        export FNTB_API_KEY="${wizard_api_key}"
-        log_msg "API Key 已设置"
-    fi
-
-    log_msg "服务端口: ${FNTB_PORT}"
-    log_msg "Gunicorn: ${GUNICORN}"
-
-    # 检查 gunicorn 是否存在
-    if [ ! -x "${GUNICORN}" ]; then
-        log_msg "ERROR: gunicorn 不存在或无执行权限: ${GUNICORN}"
-        exit 1
-    fi
-
-    # 清理旧进程
-    if [ -f "${PID_FILE}" ]; then
-        old_pid=$(cat "${PID_FILE}" | tr -d '[:space:]')
-        if [ -n "${old_pid}" ] && kill -0 "${old_pid}" 2>/dev/null; then
-            log_msg "清理旧进程 PID=${old_pid}"
-            kill "${old_pid}" 2>/dev/null
-            sleep 1
-        fi
-        rm -f "${PID_FILE}"
-    fi
-
-    # 启动服务
-    log_msg "启动 gunicorn..."
-    nohup "${GUNICORN}" \
-        -w 1 \
-        -b "0.0.0.0:${FNTB_PORT}" \
-        --chdir "${APP_DIR}" \
-        --timeout 30 \
-        --access-logfile "${TRIM_PKGVAR}/access.log" \
-        --error-logfile "${TRIM_PKGVAR}/error.log" \
-        server:app >> "${LOG_FILE}" 2>&1 &
-    GPID=$!
-    echo "${GPID}" > "${PID_FILE}"
-    log_msg "Gunicorn 进程已启动 PID=${GPID}"
-
-    # 等待 3 秒检查是否存活
-    sleep 3
-    if kill -0 "${GPID}" 2>/dev/null; then
-        log_msg "启动成功，进程存活"
-    else
-        log_msg "ERROR: 进程启动后立即退出"
-        log_msg "=== 最近日志 ==="
-        tail -30 "${LOG_FILE}" >> "${LOG_FILE}"
-        log_msg "=== error.log ==="
-        if [ -f "${TRIM_PKGVAR}/error.log" ]; then
-            cat "${TRIM_PKGVAR}/error.log" >> "${LOG_FILE}"
-        fi
-        rm -f "${PID_FILE}"
-        exit 1
-    fi
-    exit 0
-    ;;
-stop)
-    log_msg "=== 停止服务 ==="
-    if [ -f "${PID_FILE}" ]; then
-        pid=$(cat "${PID_FILE}" | tr -d '[:space:]')
-        if [ -n "$pid" ]; then
-            kill "$pid" 2>/dev/null
-            for _i in $(seq 1 10); do
-                kill -0 "$pid" 2>/dev/null || break
-                sleep 1
+        for vol in /vol1 /vol2 /vol3; do
+            for p in "${vol}/@appcenter/python3.12/bin/python3" "${vol}/@appcenter/python3/bin/python3"; do
+                if [ -x "$p" ]; then PYTHON_BIN="$p"; break 2; fi
             done
-            kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
-            log_msg "进程 ${pid} 已停止"
+        done
+    fi
+    if [ -z "${PYTHON_BIN}" ]; then
+        echo "未找到 Python3，请在应用中心安装 Python 3.12" > "${ERROR_LOG}"
+        exit 1
+    fi
+    log_msg "Python: ${PYTHON_BIN} ($(${PYTHON_BIN} --version 2>&1))"
+
+    # ── 安装依赖 ──
+    VENV_DIR="${TRIM_PKGVAR}/venv"
+    if [ ! -f "${VENV_DIR}/bin/activate" ]; then
+        log_msg "创建虚拟环境..."
+        if ! ${PYTHON_BIN} -m venv "${VENV_DIR}" 2>>"${LOG_FILE}"; then
+            log_msg "venv 创建失败，尝试 pip install --user"
+            ${PYTHON_BIN} -m pip install --user -r "${APP_DIR}/requirements.txt" >> "${LOG_FILE}" 2>&1
+            PYTHON_PATH="${PYTHON_BIN}"
+        else
+            source "${VENV_DIR}/bin/activate"
+            pip install -r "${APP_DIR}/requirements.txt" >> "${LOG_FILE}" 2>&1
+            PYTHON_PATH="${VENV_DIR}/bin/python"
+        fi
+    else
+        source "${VENV_DIR}/bin/activate"
+        PYTHON_PATH="${VENV_DIR}/bin/python"
+    fi
+    log_msg "Python 环境就绪: ${PYTHON_PATH}"
+
+    # ── 启动服务 ──
+    log_msg "启动 FNTB 图标管理器..."
+    nohup "${PYTHON_PATH}" "${APP_DIR}/server.py" >> "${LOG_FILE}" 2>&1 &
+    SERVER_PID=$!
+    echo "${SERVER_PID}" > "${PID_FILE}"
+    log_msg "服务已启动 PID=${SERVER_PID}"
+
+    # ── 存活检查 ──
+    sleep 3
+    if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
+        log_msg "ERROR: 服务启动后立即退出！"
+        log_msg "--- 最近日志 ---"
+        tail -30 "${LOG_FILE}" >> "${LOG_FILE}"
+        echo "服务启动失败，请查看日志: ${LOG_FILE}" > "${ERROR_LOG}"
+        rm -f "${PID_FILE}"
+        exit 1
+    fi
+    log_msg "服务运行正常 (PID=${SERVER_PID})"
+    exit 0
+;;
+
+stop)
+    if [ -f "${PID_FILE}" ]; then
+        PID=$(cat "${PID_FILE}" | tr -d '[:space:]')
+        if [ -n "${PID}" ] && kill -0 "${PID}" 2>/dev/null; then
+            kill "${PID}" 2>/dev/null
+            sleep 2
+            kill -9 "${PID}" 2>/dev/null
+            log_msg "服务已停止 PID=${PID}"
         fi
         rm -f "${PID_FILE}"
     fi
     exit 0
-    ;;
-restart)
-    $0 stop
-    sleep 1
-    $0 start
-    exit 0
-    ;;
+;;
+
 status)
     if [ -f "${PID_FILE}" ]; then
-        pid=$(cat "${PID_FILE}" | tr -d '[:space:]')
-        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        PID=$(cat "${PID_FILE}" | tr -d '[:space:]')
+        if [ -n "${PID}" ] && kill -0 "${PID}" 2>/dev/null; then
             exit 0
         fi
         rm -f "${PID_FILE}"
     fi
     exit 3
-    ;;
+;;
+
 *)
-    echo "Usage: $0 {start|stop|restart|status}"
     exit 1
-    ;;
+;;
 esac

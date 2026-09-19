@@ -6,791 +6,439 @@
     <title>FNTB 图标管理器</title>
     <style>
         :root {
-            --bg: #0f1117;
-            --bg-card: #1a1d27;
-            --bg-hover: #242836;
-            --bg-input: #12141c;
-            --border: #2a2e3a;
-            --text: #e4e6eb;
-            --text-dim: #8b8fa3;
-            --accent: #6366f1;
-            --accent-hover: #818cf8;
+            --bg: #0f172a;
+            --card: #1e293b;
+            --border: #334155;
+            --text: #f1f5f9;
+            --text-dim: #94a3b8;
+            --primary: #6366f1;
             --success: #22c55e;
-            --warning: #f59e0b;
             --danger: #ef4444;
-            --radius: 10px;
+            --radius: 12px;
         }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            min-height: 100vh;
-        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
 
-        /* Header */
-        .header {
-            background: var(--bg-card);
-            border-bottom: 1px solid var(--border);
-            padding: 16px 24px;
-            display: flex;
-            align-items: center;
-            gap: 16px;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-        .header .logo {
-            font-size: 20px;
-            font-weight: 700;
-            color: var(--accent);
-        }
-        .header .logo span { color: var(--text-dim); font-weight: 400; font-size: 14px; margin-left: 8px; }
-        .header .actions { margin-left: auto; display: flex; gap: 8px; }
+        .header { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; background: var(--card); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10; }
+        .logo { font-size: 20px; font-weight: 700; }
+        .logo span { color: var(--primary); }
+        .header-actions { display: flex; gap: 8px; }
 
-        /* Buttons */
-        .btn {
-            padding: 8px 16px;
-            border-radius: var(--radius);
-            border: 1px solid var(--border);
-            background: var(--bg-card);
-            color: var(--text);
-            cursor: pointer;
-            font-size: 13px;
-            transition: all 0.15s;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .btn:hover { background: var(--bg-hover); border-color: var(--accent); }
-        .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-        .btn-primary:hover { background: var(--accent-hover); }
-        .btn-danger { border-color: var(--danger); color: var(--danger); }
-        .btn-danger:hover { background: rgba(239,68,68,0.1); }
-        .btn-sm { padding: 4px 10px; font-size: 12px; }
-        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-        /* Toolbar */
-        .toolbar {
-            padding: 12px 24px;
-            display: flex;
-            gap: 12px;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-        .search-box {
-            flex: 1;
-            min-width: 200px;
-            max-width: 400px;
-            position: relative;
-        }
-        .search-box input {
-            width: 100%;
-            padding: 8px 12px 8px 36px;
-            border-radius: var(--radius);
-            border: 1px solid var(--border);
-            background: var(--bg-input);
-            color: var(--text);
-            font-size: 13px;
-            outline: none;
-        }
-        .search-box input:focus { border-color: var(--accent); }
-        .search-box::before {
-            content: "🔍";
-            position: absolute;
-            left: 10px;
-            top: 50%;
-            transform: translateY(-50%);
-            font-size: 14px;
-        }
+        .toolbar { display: flex; align-items: center; gap: 12px; padding: 16px 24px; flex-wrap: wrap; }
+        .search-box { flex: 1; min-width: 200px; position: relative; }
+        .search-box input { width: 100%; padding: 10px 14px 10px 36px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 14px; outline: none; }
+        .search-box::before { content: "🔍"; position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-size: 14px; }
         .filter-btns { display: flex; gap: 4px; }
-        .filter-btn {
-            padding: 6px 12px;
-            border-radius: 20px;
-            border: 1px solid var(--border);
-            background: transparent;
-            color: var(--text-dim);
-            cursor: pointer;
-            font-size: 12px;
-            transition: all 0.15s;
-        }
-        .filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-        .filter-btn:hover:not(.active) { border-color: var(--accent); color: var(--text); }
+        .filter-btn { padding: 8px 16px; border-radius: 20px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); cursor: pointer; font-size: 13px; white-space: nowrap; }
+        .filter-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
 
-        /* Stats bar */
-        .stats {
-            padding: 0 24px 8px;
-            display: flex;
-            gap: 16px;
-            font-size: 12px;
-            color: var(--text-dim);
-        }
-        .stats .badge {
-            padding: 2px 8px;
-            border-radius: 10px;
-            background: var(--bg-hover);
-        }
+        .btn { padding: 8px 16px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--card); color: var(--text); cursor: pointer; font-size: 13px; white-space: nowrap; }
+        .btn:hover { background: var(--border); }
+        .btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+        .btn-primary:hover { opacity: 0.9; }
+        .btn-danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 
-        /* App Grid */
-        .app-grid {
-            padding: 0 24px 24px;
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            gap: 12px;
-        }
-        .app-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            padding: 16px;
-            transition: all 0.15s;
-        }
-        .app-card:hover { border-color: var(--accent); }
-        .app-card .card-head {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 12px;
-        }
-        .app-card .icon-preview {
-            width: 48px;
-            height: 48px;
-            border-radius: 10px;
-            background: var(--bg-hover);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            flex-shrink: 0;
-        }
-        .app-card .icon-preview img {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-        }
-        .app-card .icon-preview .placeholder {
-            font-size: 24px;
-            opacity: 0.3;
-        }
-        .app-card .app-name {
-            font-weight: 600;
-            font-size: 14px;
-            word-break: break-all;
-        }
-        .app-card .app-status {
-            font-size: 11px;
-            color: var(--text-dim);
-        }
-        .app-card .card-icons {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 12px;
-        }
-        .app-card .card-icons .icon-item {
-            text-align: center;
-        }
-        .app-card .card-icons .icon-item img,
-        .app-card .card-icons .icon-item .icon-empty {
-            width: 32px;
-            height: 32px;
-            border-radius: 6px;
-            border: 1px dashed var(--border);
-            object-fit: contain;
-        }
-        .app-card .card-icons .icon-item .icon-empty {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--text-dim);
-            font-size: 10px;
-        }
-        .app-card .card-icons .icon-item .icon-label {
-            font-size: 10px;
-            color: var(--text-dim);
-            margin-top: 2px;
-        }
-        .app-card .card-actions {
-            display: flex;
-            gap: 6px;
-            flex-wrap: wrap;
-        }
+        .stats { padding: 0 24px 8px; font-size: 13px; color: var(--text-dim); }
+
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; padding: 16px 24px; }
+
+        .app-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; transition: border-color 0.2s; }
+        .app-card:hover { border-color: var(--primary); }
+        .card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+        .icon-preview { width: 48px; height: 48px; border-radius: 10px; overflow: hidden; background: #0f172a; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .icon-preview img { width: 100%; height: 100%; object-fit: cover; }
+        .placeholder { font-size: 24px; opacity: 0.3; }
+        .app-name { font-weight: 600; font-size: 15px; line-height: 1.3; word-break: break-all; }
+        .app-version { font-size: 12px; color: var(--text-dim); }
+        .card-icons { display: flex; gap: 8px; margin-bottom: 12px; }
+        .icon-thumb { width: 56px; height: 56px; border-radius: 8px; background: #0f172a; overflow: hidden; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .icon-thumb img { width: 100%; height: 100%; object-fit: cover; }
+        .icon-thumb .label { font-size: 10px; color: var(--text-dim); text-align: center; }
+        .card-status { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-bottom: 12px; }
+        .status-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+        .badge-default { background: rgba(148,163,184,0.2); color: var(--text-dim); }
+        .badge-custom { background: rgba(99,102,241,0.2); color: var(--primary); }
+        .card-actions { display: flex; gap: 6px; }
+        .card-actions .btn { flex: 1; text-align: center; }
 
         /* Modal */
-        .modal-overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(0,0,0,0.6);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 200;
-        }
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 100; }
         .modal-overlay.show { display: flex; }
-        .modal {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 24px;
-            min-width: 400px;
-            max-width: 90vw;
-            max-height: 80vh;
-            overflow-y: auto;
-        }
-        .modal h3 { margin-bottom: 16px; }
-        .modal .close-btn {
-            float: right;
-            background: none;
-            border: none;
-            color: var(--text-dim);
-            font-size: 20px;
-            cursor: pointer;
-        }
-        .modal .close-btn:hover { color: var(--text); }
-
-        /* Upload area */
-        .upload-area {
-            border: 2px dashed var(--border);
-            border-radius: var(--radius);
-            padding: 32px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.15s;
-            margin: 12px 0;
-        }
-        .upload-area:hover, .upload-area.dragover {
-            border-color: var(--accent);
-            background: rgba(99,102,241,0.05);
-        }
-        .upload-area input { display: none; }
-        .upload-area .upload-icon { font-size: 36px; margin-bottom: 8px; }
-        .upload-area .upload-text { color: var(--text-dim); font-size: 13px; }
-
-        /* Preview in modal */
-        .upload-preview {
-            text-align: center;
-            margin: 12px 0;
-        }
-        .upload-preview img {
-            max-width: 128px;
-            max-height: 128px;
-            border-radius: 10px;
-            border: 1px solid var(--border);
-        }
+        .modal { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto; position: relative; }
+        .modal h3 { font-size: 18px; margin-bottom: 16px; }
+        .close-btn { position: absolute; right: 16px; top: 16px; background: none; border: none; color: var(--text-dim); font-size: 24px; cursor: pointer; }
+        .upload-area { border: 2px dashed var(--border); border-radius: var(--radius); padding: 32px; text-align: center; cursor: pointer; margin-bottom: 16px; transition: border-color 0.2s; }
+        .upload-area:hover, .upload-area.dragover { border-color: var(--primary); }
+        .upload-area p { color: var(--text-dim); font-size: 14px; }
+        .preview-container { text-align: center; margin-bottom: 16px; }
+        .preview-container img { max-width: 200px; max-height: 200px; border-radius: var(--radius); }
+        .preview-info { font-size: 12px; color: var(--text-dim); margin-top: 8px; }
 
         /* Toast */
-        .toast-container {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 300;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        .toast {
-            padding: 12px 20px;
-            border-radius: var(--radius);
-            font-size: 13px;
-            animation: slideIn 0.3s ease;
-            max-width: 360px;
-        }
-        .toast-success { background: rgba(34,197,94,0.15); border: 1px solid var(--success); color: var(--success); }
-        .toast-error { background: rgba(239,68,68,0.15); border: 1px solid var(--danger); color: var(--danger); }
-        .toast-info { background: rgba(99,102,241,0.15); border: 1px solid var(--accent); color: var(--accent-hover); }
-        @keyframes slideIn {
-            from { transform: translateX(100%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
-        }
+        .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 200; display: flex; flex-direction: column; gap: 8px; }
+        .toast { padding: 12px 20px; border-radius: var(--radius); font-size: 14px; animation: slideIn 0.3s ease; color: #fff; }
+        .toast-success { background: var(--success); }
+        .toast-error { background: var(--danger); }
+        .toast-info { background: var(--primary); }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
-        /* Config modal */
-        .config-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 0;
-            border-bottom: 1px solid var(--border);
-        }
-        .config-row:last-child { border-bottom: none; }
-        .config-row label { color: var(--text-dim); font-size: 13px; }
+        .empty-state { grid-column: 1 / -1; text-align: center; padding: 64px; color: var(--text-dim); }
+        .empty-icon { font-size: 48px; margin-bottom: 16px; }
 
-        /* Loading */
-        .loading-spinner {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid var(--border);
-            border-top-color: var(--accent);
-            border-radius: 50%;
-            animation: spin 0.6s linear infinite;
-        }
+        .batch-select { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; margin: 16px 0; max-height: 300px; overflow-y: auto; }
+        .batch-select label { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+        .batch-select label:hover { background: rgba(255,255,255,0.05); }
+        .batch-select input[type="checkbox"] { accent-color: var(--primary); }
+
+        .loading-spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
-
-        /* Empty state */
-        .empty-state {
-            text-align: center;
-            padding: 60px 24px;
-            color: var(--text-dim);
-        }
-        .empty-state .empty-icon { font-size: 48px; margin-bottom: 16px; }
-
-        /* Auth */
-        .auth-overlay {
-            position: fixed;
-            inset: 0;
-            background: var(--bg);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 500;
-        }
-        .auth-box {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 32px;
-            width: 380px;
-            text-align: center;
-        }
-        .auth-box h2 { margin-bottom: 8px; color: var(--accent); }
-        .auth-box p { color: var(--text-dim); font-size: 13px; margin-bottom: 20px; }
-        .auth-box input {
-            width: 100%;
-            padding: 10px 14px;
-            border-radius: var(--radius);
-            border: 1px solid var(--border);
-            background: var(--bg-input);
-            color: var(--text);
-            font-size: 14px;
-            outline: none;
-            margin-bottom: 16px;
-        }
-        .auth-box input:focus { border-color: var(--accent); }
-        .auth-box .btn { width: 100%; justify-content: center; }
     </style>
 </head>
 <body>
-    <!-- Main -->
-    <div id="mainApp">
-        <div class="header">
-            <div class="logo">FNTB <span>图标管理器</span></div>
-            <div class="actions">
-                <button class="btn btn-sm" onclick="refreshApps()">🔄 刷新</button>
-                <button class="btn btn-sm" onclick="openConfig()">⚙️ 设置</button>
-                <button class="btn btn-sm" onclick="openBatchUpload()">📦 批量替换</button>
-            </div>
-        </div>
-
-        <div class="toolbar">
-            <div class="search-box">
-                <input type="text" id="searchInput" placeholder="搜索应用名称..." oninput="onSearch()">
-            </div>
-            <div class="filter-btns">
-                <button class="filter-btn active" data-filter="" onclick="setFilter(this)">全部</button>
-                <button class="filter-btn" data-filter="custom" onclick="setFilter(this)">已自定义</button>
-                <button class="filter-btn" data-filter="default" onclick="setFilter(this)">原始图标</button>
-            </div>
-            <div style="margin-left:auto;">
-                <button class="btn btn-sm btn-danger" onclick="openBatchRestore()">↩️ 批量还原</button>
-            </div>
-        </div>
-
-        <div class="stats" id="statsBar">
-            <span>共 <span class="badge" id="totalCount">0</span> 个应用</span>
-        </div>
-
-        <div class="app-grid" id="appGrid">
-            <div class="empty-state">
-                <div class="empty-icon">📂</div>
-                <p>加载中...</p>
-            </div>
+    <!-- Header -->
+    <div class="header">
+        <div class="logo"><span>🎨</span> FNTB 图标管理器</div>
+        <div class="header-actions">
+            <button class="btn" onclick="refreshApps()">🔄 刷新</button>
+            <button class="btn btn-primary" onclick="openBatchReplace()">📦 批量替换</button>
+            <button class="btn btn-danger" onclick="openBatchRestore()">↩️ 批量还原</button>
         </div>
     </div>
 
-    <!-- Replace Icon Modal -->
+    <!-- Toolbar -->
+    <div class="toolbar">
+        <div class="search-box">
+            <input type="text" id="searchInput" placeholder="搜索应用名称..." oninput="onSearch()">
+        </div>
+        <div class="filter-btns">
+            <button class="filter-btn active" data-filter="" onclick="setFilter(this)">全部</button>
+            <button class="filter-btn" data-filter="custom" onclick="setFilter(this)">已自定义</button>
+            <button class="filter-btn" data-filter="default" onclick="setFilter(this)">默认图标</button>
+        </div>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <!-- App Grid -->
+    <div class="grid" id="appGrid">
+        <div class="empty-state">
+            <div class="empty-icon">⏳</div>
+            <p>加载中...</p>
+        </div>
+    </div>
+
+    <!-- Replace Modal -->
     <div class="modal-overlay" id="replaceModal">
         <div class="modal">
             <button class="close-btn" onclick="closeModal('replaceModal')">&times;</button>
-            <h3>替换图标</h3>
-            <p id="replaceModalApp" style="color:var(--text-dim);font-size:13px;margin-bottom:12px;"></p>
+            <h3 id="replaceModalTitle">替换图标</h3>
+            <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px;" id="replaceModalApp"></p>
             <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
-                <div class="upload-icon">📁</div>
-                <div class="upload-text">点击或拖拽 PNG 图片到此处<br>最大 2MB</div>
-                <input type="file" id="fileInput" accept="image/png" onchange="onFileSelected(this)">
+                <p>点击或拖拽上传 PNG 图片</p>
+                <p style="font-size:12px;margin-top:4px;">建议尺寸 256×256，最大 2MB</p>
             </div>
-            <div class="upload-preview" id="uploadPreview" style="display:none;">
-                <img id="previewImg">
-                <p id="previewInfo" style="color:var(--text-dim);font-size:12px;margin-top:8px;"></p>
+            <input type="file" id="fileInput" accept=".png" style="display:none" onchange="onFileSelected(this)">
+            <div class="preview-container" id="uploadPreview" style="display:none;">
+                <img id="previewImg" src="">
+                <div class="preview-info" id="previewInfo"></div>
             </div>
-            <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">
-                <button class="btn" onclick="closeModal('replaceModal')">取消</button>
-                <button class="btn btn-primary" id="confirmReplaceBtn" onclick="confirmReplace()" disabled>确认替换</button>
+            <div style="display:flex;gap:8px;">
+                <button class="btn" style="flex:1" onclick="closeModal('replaceModal')">取消</button>
+                <button class="btn btn-primary" id="confirmReplaceBtn" style="flex:1" disabled onclick="confirmReplace()">确认替换</button>
             </div>
         </div>
     </div>
 
-    <!-- Batch Upload Modal -->
+    <!-- Batch Modal -->
     <div class="modal-overlay" id="batchModal">
         <div class="modal">
             <button class="close-btn" onclick="closeModal('batchModal')">&times;</button>
-            <h3 id="batchModalTitle">批量替换图标</h3>
-            <p style="color:var(--text-dim);font-size:13px;margin-bottom:12px;">选择要操作的应用：</p>
-            <div style="margin-bottom:12px;">
-                <button class="btn btn-sm" onclick="toggleAllBatch(true)">全选</button>
-                <button class="btn btn-sm" onclick="toggleAllBatch(false)">取消全选</button>
-            </div>
-            <div id="batchAppList" style="max-height:300px;overflow-y:auto;margin-bottom:16px;"></div>
+            <h3 id="batchModalTitle">批量操作</h3>
             <div id="batchUploadArea" style="display:none;">
                 <div class="upload-area" onclick="document.getElementById('batchFileInput').click()">
-                    <div class="upload-icon">📦</div>
-                    <div class="upload-text">点击选择 PNG 图片<br>将应用到所有选中的应用</div>
-                    <input type="file" id="batchFileInput" accept="image/png" onchange="onBatchFileSelected(this)">
+                    <p>选择一张 PNG 作为统一图标</p>
                 </div>
-                <div class="upload-preview" id="batchPreview" style="display:none;">
-                    <img id="batchPreviewImg">
+                <input type="file" id="batchFileInput" accept=".png" style="display:none" onchange="onBatchFileSelected(this)">
+                <div class="preview-container" id="batchPreview" style="display:none;">
+                    <img id="batchPreviewImg" src="" style="max-width:120px;border-radius:8px;">
                 </div>
             </div>
-            <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">
-                <button class="btn" onclick="closeModal('batchModal')">取消</button>
-                <button class="btn btn-primary" id="confirmBatchBtn" onclick="confirmBatch()">确认执行</button>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;">
+                <span style="font-size:13px;color:var(--text-dim);">选择应用</span>
+                <label style="font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer;">
+                    <input type="checkbox" id="selectAllBatch" onchange="toggleAllBatch(this.checked)"> 全选
+                </label>
+            </div>
+            <div class="batch-select" id="batchAppList"></div>
+            <div style="display:flex;gap:8px;margin-top:16px;">
+                <button class="btn" style="flex:1" onclick="closeModal('batchModal')">取消</button>
+                <button class="btn btn-primary" id="confirmBatchBtn" style="flex:1" onclick="confirmBatch()">执行</button>
             </div>
         </div>
     </div>
 
-    <!-- Config Modal -->
-    <div class="modal-overlay" id="configModal">
-        <div class="modal">
-            <button class="close-btn" onclick="closeModal('configModal')">&times;</button>
-            <h3>⚙️ 设置</h3>
-            <div id="configContent" style="margin-top:16px;"></div>
-        </div>
-    </div>
-
-    <!-- Toast Container -->
+    <!-- Toast -->
     <div class="toast-container" id="toastContainer"></div>
 
-    <script>
-        const URL_PREFIX = "{{ url_prefix }}";
-        let currentFilter = "";
-        let allApps = [];
-        let replaceTarget = null; // { appname }
-        let batchMode = "replace"; // "replace" | "restore"
-        let batchSelectedFile = null;
+<script>
+let currentFilter = "";
+let allApps = [];
+let replaceTarget = null;
+let batchMode = "replace";
+let batchSelectedFile = null;
+let batchApps = []; // full app list for batch selection
 
-        // ── API helpers ──────────────────────────────────
-        async function apiGet(path) {
-            const resp = await fetch(`${URL_PREFIX}${path}`);
-            return resp.json();
+// ── API helpers ──
+async function apiGet(path) {
+    try {
+        const resp = await fetch(path);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        return resp.json();
+    } catch (e) {
+        toast("请求失败: " + e.message, "error");
+        return null;
+    }
+}
+
+async function apiPost(path, body) {
+    try {
+        const resp = await fetch(path, { method: "POST", body });
+        return resp;
+    } catch (e) {
+        toast("请求失败: " + e.message, "error");
+        return null;
+    }
+}
+
+// ── Load apps ──
+async function loadApps() {
+    let path = "/api/apps";
+    const params = [];
+    if (currentFilter) params.push(`status=${currentFilter}`);
+    const q = document.getElementById("searchInput").value.trim();
+    if (q) params.push(`q=${encodeURIComponent(q)}`);
+    if (params.length) path += "?" + params.join("&");
+
+    const data = await apiGet(path);
+    if (!data) return;
+    allApps = data.apps || [];
+    document.getElementById("stats").textContent = `共 ${data.total} 个应用`;
+    renderApps();
+}
+
+function renderApps() {
+    const grid = document.getElementById("appGrid");
+    if (!allApps.length) {
+        grid.innerHTML = `<div class="empty-state"><div class="empty-icon">📂</div><p>没有找到应用</p></div>`;
+        return;
+    }
+    grid.innerHTML = allApps.map(a => {
+        const iconUrl64 = `/api/apps/${encodeURIComponent(a.name)}/icon/64`;
+        const iconUrl256 = `/api/apps/${encodeURIComponent(a.name)}/icon/256`;
+        const statusBadge = a.has_custom_icon
+            ? '<span class="status-badge badge-custom">● 已自定义</span>'
+            : '<span class="status-badge badge-default">○ 默认</span>';
+        return `
+        <div class="app-card">
+            <div class="card-head">
+                <div class="icon-preview">
+                    ${a.icons["64"] ? `<img src="${iconUrl64}" loading="lazy">` : '<div class="placeholder">📦</div>'}
+                </div>
+                <div style="min-width:0;">
+                    <div class="app-name">${escHtml(a.display_name || a.name)}</div>
+                    <div class="app-version">${escHtml(a.name)}${a.version ? ' v' + escHtml(a.version) : ''}</div>
+                </div>
+            </div>
+            <div class="card-icons">
+                <div class="icon-thumb">
+                    ${a.icons["64"] ? `<img src="${iconUrl64}" loading="lazy">` : '<div class="label">无</div>'}
+                </div>
+                <div class="icon-thumb">
+                    ${a.icons["256"] ? `<img src="${iconUrl256}" loading="lazy">` : '<div class="label">无</div>'}
+                </div>
+            </div>
+            <div class="card-status">${statusBadge}</div>
+            <div class="card-actions">
+                <button class="btn btn-primary" onclick="openReplace('${escAttr(a.name)}')">🖼️ 替换</button>
+                <button class="btn" onclick="restoreIcon('${escAttr(a.name)}')" ${!a.has_custom_icon ? 'disabled style="opacity:0.4"' : ''}>↩️ 还原</button>
+            </div>
+        </div>`;
+    }).join("");
+}
+
+function escHtml(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function escAttr(s) { return (s || '').replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
+
+// ── Search & Filter ──
+let searchTimer;
+function onSearch() { clearTimeout(searchTimer); searchTimer = setTimeout(loadApps, 300); }
+
+function setFilter(btn) {
+    document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    currentFilter = btn.dataset.filter;
+    loadApps();
+}
+
+function refreshApps() {
+    apiGet("/api/refresh").then(() => { loadApps(); toast("已刷新", "success"); });
+}
+
+// ─ Replace ──
+function openReplace(appname) {
+    replaceTarget = { appname };
+    document.getElementById("replaceModalApp").textContent = `应用: ${appname}`;
+    document.getElementById("uploadPreview").style.display = "none";
+    document.getElementById("confirmReplaceBtn").disabled = true;
+    document.getElementById("fileInput").value = "";
+    openModal("replaceModal");
+}
+
+function onFileSelected(input) {
+    const file = input.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { toast("文件超过 2MB", "error"); input.value = ""; return; }
+    const reader = new FileReader();
+    reader.onload = e => {
+        document.getElementById("previewImg").src = e.target.result;
+        document.getElementById("previewInfo").textContent = `${file.name} (${(file.size/1024).toFixed(1)} KB)`;
+        document.getElementById("uploadPreview").style.display = "block";
+        document.getElementById("confirmReplaceBtn").disabled = false;
+    };
+    reader.readAsDataURL(file);
+}
+
+async function confirmReplace() {
+    if (!replaceTarget) return;
+    const file = document.getElementById("fileInput").files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append("file", file);
+    const btn = document.getElementById("confirmReplaceBtn");
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading-spinner"></span> 处理中...';
+    try {
+        const resp = await apiPost(`/api/apps/${encodeURIComponent(replaceTarget.appname)}/icon`, fd);
+        const data = await resp.json();
+        if (resp.ok) { toast("图标替换成功", "success"); closeModal("replaceModal"); loadApps(); }
+        else toast(`替换失败: ${data.error}`, "error");
+    } catch(e) { toast("请求失败: " + e.message, "error"); }
+    btn.disabled = false;
+    btn.textContent = "确认替换";
+}
+
+async function restoreIcon(appname) {
+    if (!confirm(`确定还原 ${appname} 的图标？`)) return;
+    try {
+        const resp = await apiPost(`/api/apps/${encodeURIComponent(appname)}/icon/restore`);
+        const data = await resp.json();
+        if (resp.ok) { toast(`${appname} 图标已还原`, "success"); loadApps(); }
+        else toast(`还原失败: ${data.error}`, "error");
+    } catch(e) { toast("请求失败: " + e.message, "error"); }
+}
+
+// ── Batch ──
+async function openBatchReplace() {
+    batchMode = "replace";
+    batchSelectedFile = null;
+    document.getElementById("batchModalTitle").textContent = "批量替换图标";
+    document.getElementById("batchUploadArea").style.display = "block";
+    document.getElementById("batchPreview").style.display = "none";
+    document.getElementById("batchFileInput").value = "";
+    await loadBatchAppList();
+    openModal("batchModal");
+}
+
+async function openBatchRestore() {
+    batchMode = "restore";
+    batchSelectedFile = null;
+    document.getElementById("batchModalTitle").textContent = "批量还原图标";
+    document.getElementById("batchUploadArea").style.display = "none";
+    await loadBatchAppList();
+    openModal("batchModal");
+}
+
+async function loadBatchAppList() {
+    const data = await apiGet("/api/apps?status=custom&limit=200");
+    const apps = (data && data.apps) || allApps;
+    const list = document.getElementById("batchAppList");
+    list.innerHTML = apps.map(a => `
+        <label><input type="checkbox" class="batch-cb" value="${escAttr(a.name)}"> ${escHtml(a.display_name || a.name)}</label>
+    `).join("");
+    document.getElementById("selectAllBatch").checked = false;
+}
+
+function toggleAllBatch(checked) {
+    document.querySelectorAll(".batch-cb").forEach(cb => cb.checked = checked);
+}
+
+function onBatchFileSelected(input) {
+    const file = input.files[0];
+    if (!file) return;
+    batchSelectedFile = file;
+    const reader = new FileReader();
+    reader.onload = e => {
+        document.getElementById("batchPreviewImg").src = e.target.result;
+        document.getElementById("batchPreview").style.display = "block";
+    };
+    reader.readAsDataURL(file);
+}
+
+async function confirmBatch() {
+    const selected = Array.from(document.querySelectorAll(".batch-cb:checked")).map(cb => cb.value);
+    if (!selected.length) { toast("请先选择应用", "error"); return; }
+    const btn = document.getElementById("confirmBatchBtn");
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading-spinner"></span> 执行中...';
+    try {
+        if (batchMode === "replace") {
+            if (!batchSelectedFile) { toast("请先选择图片", "error"); btn.disabled = false; btn.textContent = "执行"; return; }
+            const fd = new FormData();
+            fd.append("file", batchSelectedFile);
+            selected.forEach(n => fd.append("apps", n));
+            const resp = await apiPost("/api/apps/batch/replace", fd);
+            const data = await resp.json();
+            if (resp.ok) { toast(`批量替换完成 (${data.success}/${selected.length})`, "success"); closeModal("batchModal"); loadApps(); }
+            else toast(`失败: ${data.error}`, "error");
+        } else {
+            const resp = await apiPost("/api/apps/batch/restore", JSON.stringify({ apps: selected }), );
+            const data = await resp.json();
+            if (resp.ok) { toast(`批量还原完成 (${data.count})`, "success"); closeModal("batchModal"); loadApps(); }
+            else toast(`失败: ${data.error}`, "error");
         }
+    } catch(e) { toast("请求失败: " + e.message, "error"); }
+    btn.disabled = false;
+    btn.textContent = "执行";
+}
 
-        async function apiPost(path, body) {
-            const resp = await fetch(`${URL_PREFIX}${path}`, {
-                method: "POST",
-                body: body,
-            });
-            return resp;
-        }
+// ── Modals ──
+function openModal(id) { document.getElementById(id).classList.add("show"); }
+function closeModal(id) { document.getElementById(id).classList.remove("show"); }
+document.querySelectorAll(".modal-overlay").forEach(o => o.addEventListener("click", e => { if (e.target === o) o.classList.remove("show"); }));
 
-        // ── Load apps ────────────────────────────────────
-        async function loadApps() {
-            let path = "/api/apps";
-            const params = [];
-            if (currentFilter) params.push(`status=${currentFilter}`);
-            const q = document.getElementById("searchInput").value.trim();
-            if (q) params.push(`q=${encodeURIComponent(q)}`);
-            if (params.length) path += "?" + params.join("&");
+// ── Toast ──
+function toast(msg, type = "info") {
+    const el = document.createElement("div");
+    el.className = `toast toast-${type}`;
+    el.textContent = msg;
+    document.getElementById("toastContainer").appendChild(el);
+    setTimeout(() => el.remove(), 4000);
+}
 
-            const data = await apiGet(path);
-            if (!data) return;
-            allApps = data.apps || [];
-            document.getElementById("totalCount").textContent = data.total;
-            renderApps();
-        }
+// ── Drag & drop ──
+const ua = document.getElementById("uploadArea");
+if (ua) {
+    ua.addEventListener("dragover", e => { e.preventDefault(); ua.classList.add("dragover"); });
+    ua.addEventListener("dragleave", () => ua.classList.remove("dragover"));
+    ua.addEventListener("drop", e => {
+        e.preventDefault(); ua.classList.remove("dragover");
+        const f = e.dataTransfer.files[0];
+        if (f && f.type === "image/png") { const dt = new DataTransfer(); dt.items.add(f); document.getElementById("fileInput").files = dt.files; onFileSelected(document.getElementById("fileInput")); }
+    });
+}
 
-        function renderApps() {
-            const grid = document.getElementById("appGrid");
-            if (!allApps.length) {
-                grid.innerHTML = `<div class="empty-state"><div class="empty-icon">📂</div><p>没有找到应用</p></div>`;
-                return;
-            }
-            grid.innerHTML = allApps.map(app => {
-                const icon64Url = app.icons["64"] ? `${URL_PREFIX}/api/apps/${app.name}/icon/64` : "";
-                const icon256Url = app.icons["256"] ? `${URL_PREFIX}/api/apps/${app.name}/icon/256` : "";
-                const statusLabel = app.has_custom_icon
-                    ? '<span style="color:var(--success)">● 已自定义</span>'
-                    : '<span style="color:var(--text-dim)">○ 原始</span>';
-
-                return `
-                <div class="app-card">
-                    <div class="card-head">
-                        <div class="icon-preview">
-                            ${icon64Url ? `<img src="${icon64Url}">` : '<div class="placeholder">📦</div>'}
-                        </div>
-                        <div>
-                            <div class="app-name">${app.name}</div>
-                            <div class="app-status">${statusLabel}</div>
-                        </div>
-                    </div>
-                    <div class="card-icons">
-                        <div class="icon-item">
-                            ${icon64Url ? `<img src="${icon64Url}">` : '<div class="icon-empty">无</div>'}
-                            <div class="icon-label">64×64</div>
-                        </div>
-                        <div class="icon-item">
-                            ${icon256Url ? `<img src="${icon256Url}">` : '<div class="icon-empty">无</div>'}
-                            <div class="icon-label">256×256</div>
-                        </div>
-                    </div>
-                    <div class="card-actions">
-                        <button class="btn btn-sm btn-primary" onclick="openReplace('${app.name}')">替换</button>
-                        <button class="btn btn-sm" onclick="restoreIcon('${app.name}')">还原</button>
-                    </div>
-                </div>`;
-            }).join("");
-        }
-
-        // ── Search & Filter ──────────────────────────────
-        let searchTimer;
-        function onSearch() {
-            clearTimeout(searchTimer);
-            searchTimer = setTimeout(loadApps, 300);
-        }
-
-        function setFilter(btn) {
-            document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
-            btn.classList.add("active");
-            currentFilter = btn.dataset.filter;
-            loadApps();
-        }
-
-        function refreshApps() {
-            apiPost("/api/refresh").then(() => {
-                loadApps();
-                toast("已刷新", "success");
-            });
-        }
-
-        // ── Replace ──────────────────────────────────────
-        function openReplace(appname) {
-            replaceTarget = { appname };
-            document.getElementById("replaceModalApp").textContent = `应用: ${appname}`;
-            document.getElementById("uploadPreview").style.display = "none";
-            document.getElementById("confirmReplaceBtn").disabled = true;
-            document.getElementById("fileInput").value = "";
-            openModal("replaceModal");
-        }
-
-        function onFileSelected(input) {
-            const file = input.files[0];
-            if (!file) return;
-            if (file.size > 2 * 1024 * 1024) {
-                toast("文件超过 2MB 限制", "error");
-                input.value = "";
-                return;
-            }
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                document.getElementById("previewImg").src = e.target.result;
-                document.getElementById("previewInfo").textContent = `${file.name} (${(file.size/1024).toFixed(1)} KB)`;
-                document.getElementById("uploadPreview").style.display = "block";
-                document.getElementById("confirmReplaceBtn").disabled = false;
-            };
-            reader.readAsDataURL(file);
-        }
-
-        async function confirmReplace() {
-            if (!replaceTarget) return;
-            const file = document.getElementById("fileInput").files[0];
-            if (!file) return;
-
-            const formData = new FormData();
-            formData.append("file", file);
-
-            const btn = document.getElementById("confirmReplaceBtn");
-            btn.disabled = true;
-            btn.innerHTML = '<span class="loading-spinner"></span> 处理中...';
-
-            try {
-                const resp = await apiPost(`/api/apps/${replaceTarget.appname}/icon/256`, formData);
-                const data = await resp.json();
-                if (resp.ok) {
-                    toast(`图标替换成功`, "success");
-                    closeModal("replaceModal");
-                    loadApps();
-                } else {
-                    toast(`替换失败: ${data.error}`, "error");
-                }
-            } catch (e) {
-                toast("请求失败: " + e.message, "error");
-            }
-            btn.disabled = false;
-            btn.textContent = "确认替换";
-        }
-
-        // ── Restore ──────────────────────────────────────
-        async function restoreIcon(appname) {
-            if (!confirm(`确定还原 ${appname} 的图标？`)) return;
-            try {
-                const resp = await apiPost(`/api/apps/${appname}/icon/256/restore`);
-                const data = await resp.json();
-                if (resp.ok) {
-                    toast(`${appname} 图标已还原`, "success");
-                    loadApps();
-                } else {
-                    toast(`还原失败: ${data.error || "未知错误"}`, "error");
-                }
-            } catch (e) {
-                toast("请求失败: " + e.message, "error");
-            }
-        }
-
-        // ── Batch ────────────────────────────────────────
-        function openBatchUpload() {
-            batchMode = "replace";
-            batchSelectedFile = null;
-            document.getElementById("batchModalTitle").textContent = "批量替换图标";
-            document.getElementById("batchUploadArea").style.display = "block";
-            document.getElementById("batchPreview").style.display = "none";
-            document.getElementById("batchFileInput").value = "";
-            renderBatchAppList();
-            openModal("batchModal");
-        }
-
-        function openBatchRestore() {
-            batchMode = "restore";
-            batchSelectedFile = null;
-            document.getElementById("batchModalTitle").textContent = "批量还原图标";
-            document.getElementById("batchUploadArea").style.display = "none";
-            renderBatchAppList();
-            openModal("batchModal");
-        }
-
-        function renderBatchAppList() {
-            const list = document.getElementById("batchAppList");
-            list.innerHTML = allApps.map(app => `
-                <label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;">
-                    <input type="checkbox" class="batch-app-cb" value="${app.name}">
-                    <span style="font-size:13px;">${app.name}</span>
-                </label>
-            `).join("");
-        }
-
-        function toggleAllBatch(checked) {
-            document.querySelectorAll(".batch-app-cb").forEach(cb => cb.checked = checked);
-        }
-
-        function onBatchFileSelected(input) {
-            const file = input.files[0];
-            if (!file) return;
-            batchSelectedFile = file;
-            const reader = new FileReader();
-            reader.onload = e => {
-                document.getElementById("batchPreviewImg").src = e.target.result;
-                document.getElementById("batchPreview").style.display = "block";
-            };
-            reader.readAsDataURL(file);
-        }
-
-        async function confirmBatch() {
-            const selected = Array.from(document.querySelectorAll(".batch-app-cb:checked")).map(cb => cb.value);
-            if (!selected.length) { toast("请先选择应用", "error"); return; }
-
-            if (batchMode === "replace") {
-                if (!batchSelectedFile) { toast("请先选择图片", "error"); return; }
-                const formData = new FormData();
-                formData.append("file", batchSelectedFile);
-                selected.forEach(name => formData.append("apps", name));
-                const btn = document.getElementById("confirmBatchBtn");
-                btn.disabled = true;
-                try {
-                    const resp = await apiPost("/api/batch/replace", formData);
-                    const data = await resp.json();
-                    if (resp.ok) {
-                        toast(`批量替换完成，共 ${selected.length} 个应用`, "success");
-                        closeModal("batchModal");
-                        loadApps();
-                    } else {
-                        toast(`批量替换失败: ${data.error}`, "error");
-                    }
-                } catch (e) {
-                    toast("请求失败: " + e.message, "error");
-                }
-                btn.disabled = false;
-            } else {
-                // Restore
-                if (!confirm(`确定还原 ${selected.length} 个应用的图标？`)) return;
-                try {
-                    const resp = await fetch(`${URL_PREFIX}/api/batch/restore`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ apps: selected }),
-                    });
-                    const data = await resp.json();
-                    if (resp.ok) {
-                        toast(`批量还原完成`, "success");
-                        closeModal("batchModal");
-                        loadApps();
-                    } else {
-                        toast(`批量还原失败: ${data.error}`, "error");
-                    }
-                } catch (e) {
-                    toast("请求失败: " + e.message, "error");
-                }
-            }
-        }
-
-        // ── Config ───────────────────────────────────────
-        async function openConfig() {
-            openModal("configModal");
-            const data = await apiGet("/api/config");
-            if (!data) return;
-            const content = document.getElementById("configContent");
-            content.innerHTML = `
-                <div class="config-row"><label>最大上传大小</label><span>${data.max_upload_mb || 2} MB</span></div>
-                <div class="config-row"><label>支持的图标尺寸</label><span>${(data.icon_sizes || [64,256]).join(", ")} px</span></div>
-            `;
-        }
-
-
-        // ── Modals ───────────────────────────────────────
-        function openModal(id) { document.getElementById(id).classList.add("show"); }
-        function closeModal(id) { document.getElementById(id).classList.remove("show"); }
-
-        // Close modal on overlay click
-        document.querySelectorAll(".modal-overlay").forEach(overlay => {
-            overlay.addEventListener("click", e => {
-                if (e.target === overlay) overlay.classList.remove("show");
-            });
-        });
-
-        // ── Toast ────────────────────────────────────────
-        function toast(msg, type = "info") {
-            const el = document.createElement("div");
-            el.className = `toast toast-${type}`;
-            el.textContent = msg;
-            document.getElementById("toastContainer").appendChild(el);
-            setTimeout(() => el.remove(), 4000);
-        }
-
-        // ── Drag & drop ──────────────────────────────────
-        const uploadArea = document.getElementById("uploadArea");
-        if (uploadArea) {
-            uploadArea.addEventListener("dragover", e => { e.preventDefault(); uploadArea.classList.add("dragover"); });
-            uploadArea.addEventListener("dragleave", () => uploadArea.classList.remove("dragover"));
-            uploadArea.addEventListener("drop", e => {
-                e.preventDefault();
-                uploadArea.classList.remove("dragover");
-                const file = e.dataTransfer.files[0];
-                if (file && file.type === "image/png") {
-                    const dt = new DataTransfer();
-                    dt.items.add(file);
-                    document.getElementById("fileInput").files = dt.files;
-                    onFileSelected(document.getElementById("fileInput"));
-                }
-            });
-        }
-
-        // ── Init ─────────────────────────────────────────
-        loadApps();
-    </script>
+// ── Init ──
+loadApps();
+</script>
 </body>
 </html>
