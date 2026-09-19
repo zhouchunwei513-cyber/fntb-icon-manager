@@ -1,0 +1,27 @@
+#!/bin/bash
+# 配置后：重启服务使新配置生效
+PID_FILE="${TRIM_PKGVAR}/app.pid"
+if [ -f "$PID_FILE" ]; then
+  PID=$(cat "$PID_FILE" 2>/dev/null)
+  if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+    kill "$PID" 2>/dev/null
+    sleep 1
+  fi
+fi
+
+API_KEY="${wizard_api_key:-}"
+SERVICE_PORT="${wizard_service_port:-18080}"
+
+cat > "${TRIM_PKGETC}/config.json" << EOF
+{
+  "api_key": "$API_KEY",
+  "service_port": $SERVICE_PORT
+}
+EOF
+
+# 启动新服务
+cd "${TRIM_APPDEST}"
+nohup gunicorn -w 1 -b "0.0.0.0:${SERVICE_PORT}" --timeout 30 --max-requests 1000 server:app > "${TRIM_PKGVAR}/app.log" 2>&1 &
+echo $! > "$PID_FILE"
+
+exit 0

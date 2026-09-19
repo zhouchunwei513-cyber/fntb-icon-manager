@@ -1,7 +1,1 @@
-{
-  "defaults": {
-    "run-as": "package"
-  },
-  "username": "fntb",
-  "groupname": "fntb"
-}
+{"defaults":{"run-as":"package"},"username":"fntb","groupname":"fntb"}

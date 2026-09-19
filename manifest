@@ -1,4 +1,4 @@
-appname=com.fntb.icon.manager
+appname=com.fntb.iconmgr
 version=1.0.0
 display_name=FNTB图标管理器
 desc=飞牛应用图标批量管理与统一API接口服务
@@ -9,6 +9,6 @@ service_port=18080
 checkport=true
 os_min_version=1.0.0
 desktop_uidir=ui
-desktop_applaunchname=com.fntb.icon.manager.main
+desktop_applaunchname=com.fntb.iconmgr.Application
 ctl_stop=true
 install_type=

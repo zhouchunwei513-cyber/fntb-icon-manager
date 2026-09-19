@@ -1,0 +1,3 @@
+#!/bin/bash
+# 升级后：迁移配置（保留 API Key）
+exit 0
