@@ -13,5 +13,4 @@ desktop_uidir=ui
 desktop_applaunchname=com.fntb.iconmgr.Application
 ctl_stop=true
 install_type=
-install_dep_apps=python3.12
 changelog=v2.0 全新架构：扫描所有应用图标，支持自定义/还原，提供客户端API
