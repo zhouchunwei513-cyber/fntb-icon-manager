@@ -99,6 +99,7 @@
     <div class="header">
         <div class="logo"><span>🎨</span> FNTB 图标管理器</div>
         <div class="header-actions">
+            <button class="btn" onclick="showApiInfo()">📡 API</button>
             <button class="btn" onclick="refreshApps()">🔄 刷新</button>
             <button class="btn btn-primary" onclick="openBatchReplace()">📦 批量替换</button>
             <button class="btn btn-danger" onclick="openBatchRestore()">↩️ 批量还原</button>
@@ -137,6 +138,10 @@
                 <p>点击或拖拽上传 PNG 图片</p>
                 <p style="font-size:12px;margin-top:4px;">建议尺寸 256×256，最大 2MB</p>
             </div>
+            <div style="text-align:center;margin:12px 0;color:var(--text-dim);font-size:13px;">— 或 —</div>
+            <button class="btn" style="width:100%;margin-bottom:12px;border-style:dashed;" onclick="useDefaultIcon()">
+                 使用默认图标
+            </button>
             <input type="file" id="fileInput" accept=".png" style="display:none" onchange="onFileSelected(this)">
             <div class="preview-container" id="uploadPreview" style="display:none;">
                 <img id="previewImg" src="">
@@ -180,6 +185,28 @@
     <!-- Toast -->
     <div class="toast-container" id="toastContainer"></div>
 
+    <!-- API Info Panel -->
+    <div class="modal-overlay" id="apiModal">
+        <div class="modal" style="max-width:600px;">
+            <button class="close-btn" onclick="closeModal('apiModal')">&times;</button>
+            <h3>客户端 API 文档</h3>
+            <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px;">
+                以下 API 供飞牛客户端或其他应用调用，获取所有应用图标数据。
+            </p>
+            <div id="apiBaseUrl" style="background:var(--bg);padding:8px 12px;border-radius:8px;font-size:13px;margin-bottom:16px;word-break:break-all;"></div>
+            <table style="width:100%;font-size:13px;border-collapse:collapse;">
+                <thead>
+                    <tr style="border-bottom:1px solid var(--border);">
+                        <th style="text-align:left;padding:6px;">方法</th>
+                        <th style="text-align:left;padding:6px;">路径</th>
+                        <th style="text-align:left;padding:6px;">说明</th>
+                    </tr>
+                </thead>
+                <tbody id="apiTableBody"></tbody>
+            </table>
+        </div>
+    </div>
+
 <script>
 let currentFilter = "";
 let allApps = [];
@@ -187,6 +214,27 @@ let replaceTarget = null;
 let batchMode = "replace";
 let batchSelectedFile = null;
 let batchApps = []; // full app list for batch selection
+
+// ── API Info ──
+const API_ENDPOINTS = [
+    { method: "GET", path: "/api/icons/", desc: "获取所有应用图标列表（JSON）" },
+    { method: "GET", path: "/api/icons/{appname}/{size}", desc: "获取指定应用图标（size: 64/128/256）" },
+    { method: "GET", path: "/api/apps/", desc: "获取完整应用列表（含元信息）" },
+    { method: "GET", path: "/api/health", desc: "健康检查" },
+];
+function showApiInfo() {
+    const baseUrl = window.location.origin;
+    document.getElementById("apiBaseUrl").textContent = "基础地址：" + baseUrl;
+    const tbody = document.getElementById("apiTableBody");
+    tbody.innerHTML = API_ENDPOINTS.map(e =>
+        `<tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:8px;"><code style="color:var(--primary);">${e.method}</code></td>
+            <td style="padding:8px;"><code>${e.path}</code></td>
+            <td style="padding:8px;color:var(--text-dim);">${e.desc}</td>
+        </tr>`
+    ).join("");
+    document.getElementById("apiModal").classList.add("show");
+}
 
 // ── API helpers ──
 async function apiGet(path) {
@@ -325,6 +373,16 @@ async function confirmReplace() {
     } catch(e) { toast("请求失败: " + e.message, "error"); }
     btn.disabled = false;
     btn.textContent = "确认替换";
+}
+
+async function useDefaultIcon() {
+    if (!replaceTarget) return;
+    try {
+        const resp = await apiPost(`/api/apps/${encodeURIComponent(replaceTarget.appname)}/icon/restore`);
+        const data = await resp.json();
+        if (resp.ok) { toast("已切换为默认图标", "success"); closeModal("replaceModal"); loadApps(); }
+        else toast(`操作失败: ${data.error}`, "error");
+    } catch(e) { toast("请求失败: " + e.message, "error"); }
 }
 
 async function restoreIcon(appname) {

@@ -59,6 +59,40 @@ CORS(app)
 
 # ── 工具函数 ──────────────────────────────────────────
 
+def resolve_display_name(manifest, app_dir, appname):
+    """解析 manifest 中的 display_name，处理 ${...} 模板变量"""
+    raw = manifest.get("display_name", "")
+    if not raw or "${" in raw:
+        # 模板变量未解析，尝试从 locale 文件或 desc 获取
+        # 1. 尝试读取 resource/locale/zh_CN.po 或 en_US.po
+        for locale_dir in [
+            os.path.join(app_dir, "resource", "locale"),
+            os.path.join(app_dir, "locale"),
+        ]:
+            if os.path.isdir(locale_dir):
+                for po_file in ["zh_CN.po", "zh.po", "en_US.po", "en.po"]:
+                    po_path = os.path.join(locale_dir, po_file)
+                    if os.path.isfile(po_path):
+                        try:
+                            with open(po_path, "r", encoding="utf-8") as f:
+                                for line in f:
+                                    if line.startswith("msgstr") and '"' in line:
+                                        val = line.split('"')[1].strip()
+                                        if val and val != raw:
+                                            return val
+                        except Exception:
+                            pass
+        # 2. 使用 desc
+        desc = manifest.get("desc", "")
+        if desc and "${" not in desc:
+            return desc
+        # 3. 使用 appname（去掉 com. 前缀，转可读）
+        readable = appname.split(".")[-1] if "." in appname else appname
+        readable = readable.replace("-", " ").replace("_", " ").title()
+        return readable
+    return raw
+
+
 def read_manifest(app_dir):
     """读取应用 manifest 文件，返回 dict"""
     manifest_path = os.path.join(app_dir, "manifest")
@@ -137,7 +171,7 @@ def scan_all_apps():
 
             apps.append({
                 "name": appname,
-                "display_name": manifest.get("display_name", appname),
+                "display_name": resolve_display_name(manifest, app_dir, appname),
                 "version": manifest.get("version", ""),
                 "desc": manifest.get("desc", ""),
                 "source": manifest.get("source", ""),
