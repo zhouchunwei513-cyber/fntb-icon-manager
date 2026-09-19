@@ -1,9 +1,12 @@
 #!/bin/bash
-# FNTB 图标管理器 v2.0 - 启停脚本
+# FNTB 图标管理器 v2.2 - 启停脚本
 PID_FILE="${TRIM_PKGVAR}/app.pid"
 LOG_FILE="${TRIM_PKGVAR}/fntb.log"
 APP_DIR="${TRIM_APPDEST}"
 ERROR_LOG="${TRIM_TEMP_LOGFILE}"
+
+# 确保 var 目录存在
+mkdir -p "${TRIM_PKGVAR}" 2>/dev/null
 
 log_msg() { echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}"; }
 

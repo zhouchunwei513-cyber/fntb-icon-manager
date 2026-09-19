@@ -42,16 +42,21 @@ APPS_CACHE_FILE = os.path.join(VAR_DIR, "apps_cache.json")
 os.makedirs(CUSTOM_ICONS_DIR, exist_ok=True)
 os.makedirs(VAR_DIR, exist_ok=True)
 
+os.makedirs(CUSTOM_ICONS_DIR, exist_ok=True)
+os.makedirs(VAR_DIR, exist_ok=True)
+os.makedirs(APP_DIR, exist_ok=True)
+
 # ── 日志 ──────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler(os.path.join(VAR_DIR, "server.log")),
-        logging.StreamHandler(sys.stdout),
-    ],
-)
 logger = logging.getLogger("fntb-iconmgr")
+logger.setLevel(logging.INFO)
+_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+_fh = logging.FileHandler(os.path.join(VAR_DIR, "server.log"))
+_fh.setFormatter(_formatter)
+logger.addHandler(_fh)
+_sh = logging.StreamHandler(sys.stdout)
+_sh.setFormatter(_formatter)
+logger.addHandler(_sh)
+logger.info(f"VAR_DIR={VAR_DIR}, APP_DIR={APP_DIR}, CUSTOM_ICONS_DIR={CUSTOM_ICONS_DIR}")
 
 # ── Flask 应用 ────────────────────────────────────────
 app = Flask(__name__, template_folder=os.path.join(APP_DIR, "templates"))
@@ -63,38 +68,66 @@ def resolve_display_name(manifest, app_dir, appname):
     """解析 manifest 中的 display_name，处理 ${...} 模板变量"""
     raw = manifest.get("display_name", "")
     if not raw or "${" in raw:
-        # 模板变量未解析，尝试从 locale 文件获取翻译
-        # PO 文件格式: msgid "common.display_name"\nmsgstr "媒体"
-        template_key = raw.replace("${", "").replace("}", "").strip() if raw else "common.display_name"
-        for locale_dir in [
+        # 提取模板中的 key，如 "common.display_name"
+        template_key = "common.display_name"
+        if raw and "${" in raw:
+            template_key = raw.replace("${", "").replace("}", "").strip()
+
+        # 搜索所有可能的 locale 文件位置
+        search_dirs = [
             os.path.join(app_dir, "resource", "locale"),
             os.path.join(app_dir, "locale"),
-        ]:
-            if os.path.isdir(locale_dir):
-                for po_file in ["zh_CN.po", "zh.po"]:
-                    po_path = os.path.join(locale_dir, po_file)
+            os.path.join(app_dir, "lang"),
+            os.path.join(app_dir, "i18n"),
+            app_dir,  # 根目录
+        ]
+        po_files = ["zh_CN.po", "zh.po", "common.po", "messages.po", "default.po"]
+
+        for search_dir in search_dirs:
+            if not os.path.isdir(search_dir) and not os.path.isfile(search_dir):
+                continue
+            dir_list = [search_dir] if os.path.isdir(search_dir) else [os.path.dirname(search_dir)]
+            for d in dir_list:
+                for po_file in po_files:
+                    po_path = os.path.join(d, po_file)
                     if os.path.isfile(po_path):
                         try:
                             with open(po_path, "r", encoding="utf-8") as f:
-                                lines = f.readlines()
-                            for i, line in enumerate(lines):
-                                stripped = line.strip()
-                                if stripped.startswith("msgid") and template_key in stripped:
-                                    # 找到匹配的 msgid，取下一行 msgstr
-                                    for j in range(i + 1, min(i + 5, len(lines))):
-                                        next_line = lines[j].strip()
-                                        if next_line.startswith("msgstr"):
-                                            val = next_line.split('"')[1] if '"' in next_line else ""
-                                            if val:
-                                                return val
-                                            break
+                                content = f.read()
+                            # 查找 msgid "xxx" 后面紧跟的 msgstr "yyy"
+                            import re
+                            pattern = rf'msgid\s+"{re.escape(template_key)}"\s*\n\s*msgstr\s+"([^"]*)"'
+                            m = re.search(pattern, content)
+                            if m and m.group(1).strip():
+                                return m.group(1).strip()
+                            # 也尝试不带引号的匹配
+                            pattern2 = rf'msgid\s+{re.escape(template_key)}\s*\n\s*msgstr\s+"([^"]*)"'
+                            m2 = re.search(pattern2, content)
+                            if m2 and m2.group(1).strip():
+                                return m2.group(1).strip()
                         except Exception:
                             pass
-        # 尝试 desc
+
+        # 检查 JSON 格式的翻译文件
+        for json_file in ["strings.json", "i18n.json", "locale.json", "lang.json"]:
+            json_path = os.path.join(app_dir, json_file)
+            if os.path.isfile(json_path):
+                try:
+                    import json
+                    with open(json_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    val = data.get(template_key) or data.get("common", {}).get("display_name")
+                    if val:
+                        return val
+                except Exception:
+                    pass
+
+        # 尝试 desc 字段
         desc = manifest.get("desc", "")
         if desc and "${" not in desc:
             return desc
-        # 使用 appname 转可读
+
+        # 最终回退：使用 appname 转可读
         readable = appname.split(".")[-1] if "." in appname else appname
         readable = readable.replace("-", " ").replace("_", " ").title()
         return readable
