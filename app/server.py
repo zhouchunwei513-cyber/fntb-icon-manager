@@ -64,74 +64,72 @@ CORS(app)
 
 # ── 工具函数 ──────────────────────────────────────────
 
-def resolve_display_name(manifest, app_dir, appname):
-    """解析 manifest 中的 display_name，处理 ${...} 模板变量"""
-    raw = manifest.get("display_name", "")
-    if not raw or "${" in raw:
-        # 提取模板中的 key，如 "common.display_name"
-        template_key = "common.display_name"
-        if raw and "${" in raw:
-            template_key = raw.replace("${", "").replace("}", "").strip()
+def read_ui_config(app_dir):
+    """读取 app/ui/config 获取桌面入口配置"""
+    config_path = os.path.join(app_dir, "ui", "config")
+    if not os.path.isfile(config_path):
+        return {}
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
-        # 搜索所有可能的 locale 文件位置
+
+def get_app_title_from_ui_config(ui_config, applaunchname):
+    """从 ui/config 中获取指定入口的 title"""
+    url_entries = ui_config.get(".url", {})
+    entry = url_entries.get(applaunchname, {})
+    title = entry.get("title", "")
+    return title
+
+
+def resolve_display_name(manifest, app_dir, appname):
+    """解析应用显示名称，优先级：ui/config title > manifest display_name > PO文件 > appname"""
+    applaunchname = manifest.get("desktop_applaunchname", "")
+    raw = manifest.get("display_name", "")
+
+    # 1. 优先从 ui/config 获取 title
+    if applaunchname:
+        ui_config = read_ui_config(app_dir)
+        title = get_app_title_from_ui_config(ui_config, applaunchname)
+        if title and "${" not in title:
+            return title
+
+    # 2. manifest display_name 如果是直接文本
+    if raw and "${" not in raw:
+        return raw
+
+    # 3. 模板变量，尝试 PO 文件
+    if raw and "${" in raw:
+        template_key = raw.replace("${", "").replace("}", "").strip()
         search_dirs = [
             os.path.join(app_dir, "resource", "locale"),
             os.path.join(app_dir, "locale"),
             os.path.join(app_dir, "lang"),
-            os.path.join(app_dir, "i18n"),
-            app_dir,  # 根目录
         ]
-        po_files = ["zh_CN.po", "zh.po", "common.po", "messages.po", "default.po"]
-
+        po_files = ["zh_CN.po", "zh.po", "common.po", "messages.po"]
         for search_dir in search_dirs:
-            if not os.path.isdir(search_dir) and not os.path.isfile(search_dir):
+            if not os.path.isdir(search_dir):
                 continue
-            dir_list = [search_dir] if os.path.isdir(search_dir) else [os.path.dirname(search_dir)]
-            for d in dir_list:
-                for po_file in po_files:
-                    po_path = os.path.join(d, po_file)
-                    if os.path.isfile(po_path):
-                        try:
-                            with open(po_path, "r", encoding="utf-8") as f:
-                                content = f.read()
-                            # 查找 msgid "xxx" 后面紧跟的 msgstr "yyy"
-                            import re
-                            pattern = rf'msgid\s+"{re.escape(template_key)}"\s*\n\s*msgstr\s+"([^"]*)"'
-                            m = re.search(pattern, content)
-                            if m and m.group(1).strip():
-                                return m.group(1).strip()
-                            # 也尝试不带引号的匹配
-                            pattern2 = rf'msgid\s+{re.escape(template_key)}\s*\n\s*msgstr\s+"([^"]*)"'
-                            m2 = re.search(pattern2, content)
-                            if m2 and m2.group(1).strip():
-                                return m2.group(1).strip()
-                        except Exception:
-                            pass
+            for po_file in po_files:
+                po_path = os.path.join(search_dir, po_file)
+                if os.path.isfile(po_path):
+                    try:
+                        with open(po_path, "r", encoding="utf-8") as f:
+                            content = f.read()
+                        import re
+                        pattern = rf'msgid\s+"{re.escape(template_key)}"\s*\n\s*msgstr\s+"([^"]*)"'
+                        m = re.search(pattern, content)
+                        if m and m.group(1).strip():
+                            return m.group(1).strip()
+                    except Exception:
+                        pass
 
-        # 检查 JSON 格式的翻译文件
-        for json_file in ["strings.json", "i18n.json", "locale.json", "lang.json"]:
-            json_path = os.path.join(app_dir, json_file)
-            if os.path.isfile(json_path):
-                try:
-                    import json
-                    with open(json_path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    val = data.get(template_key) or data.get("common", {}).get("display_name")
-                    if val:
-                        return val
-                except Exception:
-                    pass
-
-        # 尝试 desc 字段
-        desc = manifest.get("desc", "")
-        if desc and "${" not in desc:
-            return desc
-
-        # 最终回退：使用 appname 转可读
-        readable = appname.split(".")[-1] if "." in appname else appname
-        readable = readable.replace("-", " ").replace("_", " ").title()
-        return readable
-    return raw
+    # 4. 最终回退
+    readable = appname.split(".")[-1] if "." in appname else appname
+    readable = readable.replace("-", " ").replace("_", " ").title()
+    return readable
 
 
 def read_manifest(app_dir):
@@ -204,6 +202,20 @@ def scan_all_apps():
                 continue
             seen_names.add(appname)
 
+            # 读取 ui/config 获取启动信息和显示名称
+            ui_config = read_ui_config(app_dir)
+            launch_info = {}
+            applaunchname = manifest.get("desktop_applaunchname", "")
+            if applaunchname and ui_config:
+                entry = ui_config.get(".url", {}).get(applaunchname, {})
+                if entry:
+                    launch_info = {
+                        "title": entry.get("title", ""),
+                        "protocol": entry.get("protocol", "http"),
+                        "port": entry.get("port", ""),
+                        "url": entry.get("url", "/"),
+                    }
+
             # 检查图标
             icon_64 = get_app_icon_path(app_dir, 64)
             icon_256 = get_app_icon_path(app_dir, 256)
@@ -223,6 +235,12 @@ def scan_all_apps():
                 "has_custom_icon": has_custom_icon(appname),
                 "app_dir": app_dir,
                 "root_dir": root_dir,
+                # PC 客户端兼容字段
+                "title": launch_info.get("title", ""),
+                "protocol": launch_info.get("protocol", "http"),
+                "port": launch_info.get("port", ""),
+                "path": launch_info.get("url", "/"),
+                "applaunchname": applaunchname,
             })
 
     # 按显示名称排序
@@ -319,11 +337,17 @@ def list_apps():
         result.append({
             "name": a["name"],
             "display_name": a["display_name"],
+            "title": a.get("title", "") or a["display_name"],
             "version": a["version"],
             "desc": a["desc"][:100] if a["desc"] else "",
             "source": a["source"],
             "has_default_icon": a["has_default_icon_256"] or a["has_default_icon_64"],
             "has_custom_icon": a["has_custom_icon"],
+            "protocol": a.get("protocol", "http"),
+            "tcp": a.get("protocol", "http"),
+            "port": a.get("port", ""),
+            "path": a.get("path", "/"),
+            "applaunchname": a.get("applaunchname", ""),
             "icons": {
                 "64": a["has_default_icon_64"],
                 "256": a["has_default_icon_256"],
@@ -593,7 +617,18 @@ def client_icon(appname, size):
 def client_icons_list():
     """
     获取所有应用图标列表 - 供飞牛客户端调用
-    返回所有应用名称和图标 URL
+    返回格式兼容 fnOS PC 客户端快捷方式创建列表
+    字段说明:
+      - name: 应用包名 (如 trim.media)
+      - display_name: 解析后的显示名称 (中文)
+      - title: ui/config 中的标题 (与 display_name 相同或互补)
+      - icon: 图标 URL (64px，供任务栏/快捷方式使用)
+      - icon_256: 图标 URL (256px)
+      - protocol: 协议 (http/https)
+      - port: 端口号
+      - path: 路径
+      - tcp: 协议别名 (兼容旧客户端)
+      - has_custom_icon: 是否有自定义图标
     """
     apps = get_apps_cache()
     base_url = request.url_root.rstrip("/")
@@ -602,9 +637,15 @@ def client_icons_list():
         icons.append({
             "name": a["name"],
             "display_name": a["display_name"],
+            "title": a.get("title", "") or a["display_name"],
+            "icon": f"{base_url}/api/icons/{a['name']}/64",
+            "icon_256": f"{base_url}/api/icons/{a['name']}/256",
+            "protocol": a.get("protocol", "http"),
+            "tcp": a.get("protocol", "http"),
+            "port": a.get("port", ""),
+            "path": a.get("path", "/"),
+            "url": f"{a.get('protocol', 'http')}://{a.get('port', '')}{a.get('path', '/')}",
             "has_custom_icon": a["has_custom_icon"],
-            "icon_url_64": f"{base_url}/api/icons/{a['name']}/64",
-            "icon_url_256": f"{base_url}/api/icons/{a['name']}/256",
         })
     return jsonify({"total": len(icons), "icons": icons})
 
