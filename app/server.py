@@ -29,7 +29,7 @@ import logging
 import tempfile
 from pathlib import Path
 from datetime import datetime
-from functools import lru_cache
+from functools import lru_cache, wraps
 
 from flask import Flask, request, jsonify, send_from_directory, render_template, send_file
 from flask_cors import CORS
@@ -58,7 +58,7 @@ _scan_cache = {"ts": 0, "data": None}
 
 # ──────────────────────────────────────────────────────────
 # 日志
-# ──────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────
 
 logging.basicConfig(
     level=logging.INFO,
@@ -85,6 +85,22 @@ MAX_UPLOAD_MB = 2
 app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_MB * 1024 * 1024
 
 # ──────────────────────────────────────────────────────────
+# 双路由注册（同时支持无前缀和带前缀）
+# ──────────────────────────────────────────────────────────
+
+def dual_route(rule, **options):
+    """装饰器：同时注册无前缀和带 URL_PREFIX 的路由"""
+    def decorator(f):
+        app.add_url_rule(rule, endpoint=f.__name__, view_func=f, **options)
+        if URL_PREFIX and URL_PREFIX != "/":
+            prefixed = f"{URL_PREFIX}{rule}"
+            # 用不同的 endpoint 避免冲突
+            app.add_url_rule(prefixed, endpoint=f"{f.__name__}_prefixed", view_func=f, **options)
+        return f
+    return decorator
+
+
+# ──────────────────────────────────────────────────────────
 # M7: 简单限流中间件（基于 IP + 路径，滑动窗口）
 # ──────────────────────────────────────────────────────────
 
@@ -95,7 +111,7 @@ RATE_LIMIT_MAX = 120     # 每分钟最多 120 次
 @app.before_request
 def rate_limit():
     """简单 IP 级限流，仅统计 /api/ 请求"""
-    if not request.path.startswith(f"{URL_PREFIX}/api/"):
+    if "/api/" not in request.path:
         return
     key = request.remote_addr or "unknown"
     now = time.time()
@@ -195,7 +211,6 @@ def check_api_key(req) -> bool:
 
 def require_api_key(f):
     """API Key 鉴权装饰器"""
-    from functools import wraps
     @wraps(f)
     def wrapper(*args, **kwargs):
         if not check_api_key(request):
@@ -383,26 +398,29 @@ def request_entity_too_large(error):
 
 
 # ──────────────────────────────────────────────────────────
-# 页面路由
+# 页面路由（双路由：无前缀 + 带前缀）
 # ──────────────────────────────────────────────────────────
 
-@app.route(f"{URL_PREFIX}/")
+@dual_route("/")
 def index_page():
     """Web 管理界面"""
     return render_template("index.html", url_prefix=URL_PREFIX)
 
 
-# 静态文件服务（ui 目录下的图标等）
-@app.route(f"{URL_PREFIX}/static/<path:filename>")
+@dual_route("/static/<path:filename>")
 def static_files(filename):
+    """静态文件服务"""
     return send_from_directory(str(APP_DIR / "ui"), filename)
 
 
 # ──────────────────────────────────────────────────────────
 # API: 健康检查
-# ──────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────
 
-@app.route(f"{URL_PREFIX}/api/health")
+_start_time = time.time()
+
+
+@dual_route("/api/health")
 def health_check():
     """健康检查，无需鉴权"""
     return jsonify({
@@ -412,14 +430,11 @@ def health_check():
     })
 
 
-_start_time = time.time()
-
-
 # ──────────────────────────────────────────────────────────
 # API: 应用列表
 # ──────────────────────────────────────────────────────────
 
-@app.route(f"{URL_PREFIX}/api/apps")
+@dual_route("/api/apps")
 @require_api_key
 def list_apps():
     """列出所有应用及其图标状态"""
@@ -446,7 +461,7 @@ def list_apps():
 # API: 刷新扫描缓存
 # ──────────────────────────────────────────────────────────
 
-@app.route(f"{URL_PREFIX}/api/refresh", methods=["POST"])
+@dual_route("/api/refresh", methods=["POST"])
 @require_api_key
 def refresh_scan():
     """强制刷新应用扫描缓存"""
@@ -459,7 +474,7 @@ def refresh_scan():
 # API: 获取单个应用图标
 # ──────────────────────────────────────────────────────────
 
-@app.route(f"{URL_PREFIX}/api/apps/<appname>/icon/<int:size>")
+@dual_route("/api/apps/<appname>/icon/<int:size>")
 @require_api_key
 def get_app_icon(appname, size):
     """获取应用的图标文件"""
@@ -485,7 +500,7 @@ def get_app_icon(appname, size):
 # API: 替换图标
 # ──────────────────────────────────────────────────────────
 
-@app.route(f"{URL_PREFIX}/api/apps/<appname>/icon/<int:size>", methods=["POST"])
+@dual_route("/api/apps/<appname>/icon/<int:size>", methods=["POST"])
 @require_api_key
 def replace_icon(appname, size):
     """替换应用图标（先备份旧图标再替换）"""
@@ -538,11 +553,11 @@ def replace_icon(appname, size):
     })
 
 
-# ──────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────
 # API: 还原图标
 # ──────────────────────────────────────────────────────────
 
-@app.route(f"{URL_PREFIX}/api/apps/<appname>/icon/<int:size>/restore", methods=["POST"])
+@dual_route("/api/apps/<appname>/icon/<int:size>/restore", methods=["POST"])
 @require_api_key
 def restore_app_icon(appname, size):
     """从备份还原应用图标"""
@@ -577,7 +592,7 @@ def restore_app_icon(appname, size):
 # API: 批量替换
 # ──────────────────────────────────────────────────────────
 
-@app.route(f"{URL_PREFIX}/api/batch/replace", methods=["POST"])
+@dual_route("/api/batch/replace", methods=["POST"])
 @require_api_key
 def batch_replace():
     """批量替换多个应用的图标（同一个图标应用到多个应用）"""
@@ -627,7 +642,7 @@ def batch_replace():
 # API: 批量还原
 # ──────────────────────────────────────────────────────────
 
-@app.route(f"{URL_PREFIX}/api/batch/restore", methods=["POST"])
+@dual_route("/api/batch/restore", methods=["POST"])
 @require_api_key
 def batch_restore():
     """批量还原多个应用的图标"""
@@ -666,7 +681,7 @@ def batch_restore():
 # API: 配置管理
 # ──────────────────────────────────────────────────────────
 
-@app.route(f"{URL_PREFIX}/api/config", methods=["GET"])
+@dual_route("/api/config", methods=["GET"])
 @require_api_key
 def get_config():
     """获取当前配置（脱敏 API Key）"""
@@ -678,7 +693,7 @@ def get_config():
     return jsonify(cfg)
 
 
-@app.route(f"{URL_PREFIX}/api/config", methods=["PUT"])
+@dual_route("/api/config", methods=["PUT"])
 @require_api_key
 def update_config():
     """更新配置"""
@@ -699,7 +714,7 @@ def update_config():
     return jsonify({"status": "updated"})
 
 
-@app.route(f"{URL_PREFIX}/api/config/api-key", methods=["PUT"])
+@dual_route("/api/config/api-key", methods=["PUT"])
 @require_api_key
 def update_api_key():
     """更新 API Key"""
@@ -718,7 +733,7 @@ def update_api_key():
     return jsonify({"status": "api_key_updated"})
 
 
-# ──────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────
 # 初始化
 # ──────────────────────────────────────────────────────────
 
@@ -738,6 +753,7 @@ def init():
         logger.info("Generated new API key: %s****", cfg["api_key"][:8])
 
     logger.info("FNTB Icon Manager initialized. URL_PREFIX=%s", URL_PREFIX)
+    logger.info("Routes registered: %s", [r.rule for r in app.url_map.iter_rules()])
 
 
 # 启动时初始化
