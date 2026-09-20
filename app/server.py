@@ -331,10 +331,14 @@ def scan_all_apps():
                 continue
 
             manifest = read_manifest(app_dir)
-            if not manifest.get("appname"):
+            appname = manifest.get("appname", "")
+            if not appname:
+                # manifest 缺失或无 appname（fnOS 系统应用 trim.* 常见）：
+                # 用目录名兜底，仍可提供 ICON.PNG 图标 + KNOWN_NAMES 显示名
+                appname = name
+            if not appname:
                 continue
 
-            appname = manifest["appname"]
             if appname in seen_names:
                 continue
             seen_names.add(appname)
