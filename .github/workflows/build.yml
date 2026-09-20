@@ -1,0 +1,30 @@
+name: Build FPK Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download fnpack
+        run: |
+          wget -q https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64 -O fnpack
+          chmod +x fnpack
+
+      - name: Build FPK
+        run: |
+          ./fnpack build
+          echo "FPK file:"
+          ls -la *.fpk
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "*.fpk"
+          generate_release_notes: true
