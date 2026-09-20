@@ -1,2 +1,16 @@
 #!/bin/bash
+# 卸载后：兜底确认旧数据已清除（若仍有残留则再清一次）
+set +e
+
+if [ -n "${TRIM_PKGVAR:-}" ] && [ -d "$TRIM_PKGVAR" ]; then
+  rm -rf "${TRIM_PKGVAR}/custom_icons" "${TRIM_PKGVAR}/backup" "${TRIM_PKGVAR}/venv" 2>/dev/null
+  rm -f  "${TRIM_PKGVAR}/apps_cache.json" "${TRIM_PKGVAR}/server.log" \
+         "${TRIM_PKGVAR}/fntb.log" "${TRIM_PKGVAR}/app.log" \
+         "${TRIM_PKGVAR}/config.json" "${TRIM_PKGVAR}/app.pid" 2>/dev/null
+fi
+
+if [ -n "${TRIM_PKGETC:-}" ] && [ -d "$TRIM_PKGETC" ]; then
+  rm -f "${TRIM_PKGETC}/config.json" 2>/dev/null
+fi
+
 exit 0

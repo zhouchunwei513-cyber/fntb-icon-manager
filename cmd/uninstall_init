@@ -1,4 +1,42 @@
 #!/bin/bash
-# 卸载前清理（保留用户数据）
-rm -f "${TRIM_PKGVAR}/app.pid"
+# 卸载前：停止残留服务 + 清除所有旧数据（自定义图标/缓存/日志/虚拟环境/配置），
+# 避免卸载后重装时旧数据、旧代码、旧进程残留导致“还是旧版/图标不更新”。
+set +e
+
+PID_FILE="${TRIM_PKGVAR}/app.pid"
+
+# 1. 按 PID 文件精确停止残留服务进程
+if [ -f "$PID_FILE" ]; then
+  PID=$(cat "$PID_FILE" 2>/dev/null | tr -d '[:space:]')
+  if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+    kill "$PID" 2>/dev/null
+    sleep 1
+    kill -9 "$PID" 2>/dev/null
+  fi
+fi
+
+# 2. 兜底：按应用代码路径匹配，杀掉可能残留的 server.py / gunicorn 进程（不误伤其它应用）
+if [ -n "${TRIM_APPDEST:-}" ]; then
+  pkill -f "${TRIM_APPDEST}/server.py" 2>/dev/null
+fi
+pkill -f "gunicorn.*server:app" 2>/dev/null
+
+# 3. 清除数据目录（TRIM_PKGVAR）下的旧数据
+if [ -n "${TRIM_PKGVAR:-}" ] && [ -d "$TRIM_PKGVAR" ]; then
+  rm -rf "${TRIM_PKGVAR}/custom_icons" 2>/dev/null
+  rm -rf "${TRIM_PKGVAR}/backup" 2>/dev/null
+  rm -rf "${TRIM_PKGVAR}/venv" 2>/dev/null
+  rm -f  "${TRIM_PKGVAR}/apps_cache.json" 2>/dev/null
+  rm -f  "${TRIM_PKGVAR}/server.log" 2>/dev/null
+  rm -f  "${TRIM_PKGVAR}/fntb.log" 2>/dev/null
+  rm -f  "${TRIM_PKGVAR}/app.log" 2>/dev/null
+  rm -f  "${TRIM_PKGVAR}/config.json" 2>/dev/null
+  rm -f  "${TRIM_PKGVAR}/app.pid" 2>/dev/null
+fi
+
+# 4. 清除配置目录（TRIM_PKGETC）下的旧配置
+if [ -n "${TRIM_PKGETC:-}" ] && [ -d "$TRIM_PKGETC" ]; then
+  rm -f "${TRIM_PKGETC}/config.json" 2>/dev/null
+fi
+
 exit 0

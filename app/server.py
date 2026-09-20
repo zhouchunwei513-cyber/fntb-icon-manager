@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-FNTB 图标管理器 v2.10.0 - fnOS 应用图标统一管理
+FNTB 图标管理器 v2.11.0 - fnOS 应用图标统一管理
 - 扫描 /var/apps/ 下所有应用
 - 读取每个应用的 manifest 和 ICON.PNG / ICON_256.PNG
 - 支持自定义图标替换和还原
 - 提供统一图标 API: /api/icons/{appname}/{size}
 - 客户端兼容 API: /api/client/apps
 - v2.10.0: 增强诊断日志（图标解析过程/应用扫描详情/错误上下文）+ appname 去引号归一化
+- v2.11.0: 卸载时自动清除旧数据（数据目录/配置目录残留清理）
 """
 import os
 import sys
