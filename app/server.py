@@ -281,21 +281,34 @@ def read_manifest(app_dir):
                     continue
                 if "=" in line:
                     key, value = line.split("=", 1)
-                    result[key.strip()] = value.strip()
+                    # v2.9.0: fnOS 部分 manifest 的值为带引号字符串（如 appname="trim.music"），
+                    # 解析时去除引号，否则应用名会带引号导致客户端图标查询 404
+                    result[key.strip()] = value.strip().strip('"').strip("'")
     except Exception as e:
         logger.warning(f"读取 manifest 失败 {app_dir}: {e}")
     return result
 
 
 def get_app_icon_path(app_dir, size=256):
-    """获取应用默认图标路径"""
+    """获取应用默认图标路径（ICON.PNG/ICON_256.PNG 优先，其次 ui/images/ 桌面图标）"""
     if size == 64:
-        return os.path.join(app_dir, "ICON.PNG")
+        candidates = [
+            os.path.join(app_dir, "ICON.PNG"),
+            os.path.join(app_dir, "ui", "images", "icon-64.png"),
+            os.path.join(app_dir, "ui", "images", "icon.png"),
+        ]
     else:
-        path = os.path.join(app_dir, "ICON_256.PNG")
-        if not os.path.exists(path):
-            path = os.path.join(app_dir, "ICON.PNG")
-        return path
+        candidates = [
+            os.path.join(app_dir, "ICON_256.PNG"),
+            os.path.join(app_dir, "ICON.PNG"),
+            os.path.join(app_dir, "ui", "images", "icon-256.png"),
+            os.path.join(app_dir, "ui", "images", "icon.png"),
+        ]
+    # v2.9.0: 优先返回第一个存在且非空的图标文件
+    for p in candidates:
+        if _is_valid_icon_file(p):
+            return p
+    return candidates[0]
 
 
 def get_custom_icon_path(appname, size=256):
@@ -357,11 +370,11 @@ def scan_all_apps():
                         "url": entry.get("url", "/"),
                     }
 
-            # 检查图标
+            # 检查图标（0 字节视为无图标）
             icon_64 = get_app_icon_path(app_dir, 64)
             icon_256 = get_app_icon_path(app_dir, 256)
-            has_icon_64 = os.path.isfile(icon_64)
-            has_icon_256 = os.path.isfile(icon_256)
+            has_icon_64 = _is_valid_icon_file(icon_64)
+            has_icon_256 = _is_valid_icon_file(icon_256)
 
             apps.append({
                 "name": appname,
@@ -603,7 +616,7 @@ def get_icon(appname, size):
 
     # 优先自定义图标
     custom_path = get_custom_icon_path(appname, size)
-    if os.path.isfile(custom_path):
+    if _is_valid_icon_file(custom_path):
         return send_file(custom_path, mimetype="image/png")
 
     # 默认图标
@@ -611,7 +624,7 @@ def get_icon(appname, size):
     for a in apps:
         if a["name"] == appname:
             icon_path = get_app_icon_path(a["app_dir"], size)
-            if os.path.isfile(icon_path):
+            if _is_valid_icon_file(icon_path):
                 return send_file(icon_path, mimetype="image/png")
 
     return jsonify({"error": "图标未找到"}), 404
@@ -628,7 +641,7 @@ def get_default_icon(appname, size):
     for a in apps:
         if a["name"] == appname:
             icon_path = get_app_icon_path(a["app_dir"], size)
-            if os.path.isfile(icon_path):
+            if _is_valid_icon_file(icon_path):
                 return send_file(icon_path, mimetype="image/png")
 
     return jsonify({"error": "默认图标未找到"}), 404
@@ -779,9 +792,17 @@ def _add_cache_headers(response, max_age=3600):
     return response
 
 
+def _is_valid_icon_file(path):
+    """图标文件必须存在且非空（0 字节文件视为无图标，避免 send_file 返回 200 空 body）"""
+    try:
+        return os.path.isfile(path) and os.path.getsize(path) > 0
+    except Exception:
+        return False
+
+
 def _serve_icon_with_cache(icon_path, size, target_size=256):
     """带缓存头发送图标文件，支持自动缩放"""
-    if not os.path.isfile(icon_path):
+    if not _is_valid_icon_file(icon_path):
         return None
     if size == target_size or target_size in (256, 64):
         resp = send_file(icon_path, mimetype="image/png", max_age=3600)
@@ -812,7 +833,7 @@ def client_icon(appname, size):
 
     # 优先自定义图标
     custom_path = get_custom_icon_path(appname, 256)
-    if os.path.isfile(custom_path):
+    if _is_valid_icon_file(custom_path):
         resp = _serve_icon_with_cache(custom_path, size, 256)
         if resp:
             return resp
@@ -822,7 +843,7 @@ def client_icon(appname, size):
     for a in apps:
         if a["name"] == appname:
             icon_path = get_app_icon_path(a["app_dir"], 256 if size >= 256 else 64)
-            if os.path.isfile(icon_path):
+            if _is_valid_icon_file(icon_path):
                 resp = _serve_icon_with_cache(icon_path, size, 256 if size >= 256 else 64)
                 if resp:
                     return resp

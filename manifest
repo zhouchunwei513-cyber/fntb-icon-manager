@@ -1,5 +1,5 @@
 appname=com.fntb.iconmgr
-version=2.8.0
+version=2.9.0
 display_name=FNTB图标管理器
 desc=飞牛应用图标批量管理工具，支持查看所有应用图标、自定义替换、还原默认图标，提供统一图标API供客户端调用
 platform=all
@@ -13,4 +13,4 @@ desktop_uidir=ui
 desktop_applaunchname=com.fntb.iconmgr.Application
 ctl_stop=true
 install_type=
-changelog=v2.8.0 修复trim.*系统应用manifest缺失(目录名兜底),仍可提供图标与显示名; v2.7.0 新增客户端兼容API(/api/client/apps)、HTTP缓存优化、快捷方式启动优化建议
+changelog=v2.9.0 修复manifest appname带引号导致客户端图标404、0字节图标返回200空body、增加ui/images桌面图标兜底; v2.8.0 修复trim.*系统应用manifest缺失(目录名兜底),仍可提供图标与显示名; v2.7.0 新增客户端兼容API(/api/client/apps)、HTTP缓存优化、快捷方式启动优化建议
