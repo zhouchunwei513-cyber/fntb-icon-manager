@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-FNTB 图标管理器 v2.7.0 - fnOS 应用图标统一管理
+FNTB 图标管理器 v2.10.0 - fnOS 应用图标统一管理
 - 扫描 /var/apps/ 下所有应用
 - 读取每个应用的 manifest 和 ICON.PNG / ICON_256.PNG
 - 支持自定义图标替换和还原
 - 提供统一图标 API: /api/icons/{appname}/{size}
 - 客户端兼容 API: /api/client/apps
+- v2.10.0: 增强诊断日志（图标解析过程/应用扫描详情/错误上下文）+ appname 去引号归一化
 """
 import os
 import sys
@@ -284,6 +285,13 @@ def read_manifest(app_dir):
                     # v2.9.0: fnOS 部分 manifest 的值为带引号字符串（如 appname="trim.music"），
                     # 解析时去除引号，否则应用名会带引号导致客户端图标查询 404
                     result[key.strip()] = value.strip().strip('"').strip("'")
+    except FileNotFoundError:
+        # v2.10.0: manifest 缺失是 fnOS 常见情况（trim.* 系统应用/部分第三方），记录目录内容帮助诊断
+        try:
+            entries = sorted(os.listdir(app_dir))[:20]
+        except Exception:
+            entries = []
+        logger.info(f"manifest 缺失 {app_dir} (目录内容: {entries})")
     except Exception as e:
         logger.warning(f"读取 manifest 失败 {app_dir}: {e}")
     return result
@@ -399,6 +407,13 @@ def scan_all_apps():
 
     # 按显示名称排序
     apps.sort(key=lambda x: x.get("display_name", x["name"]))
+    # v2.10.0: 扫描统计日志，便于确认应用列表是否完整
+    no_icon = [a["name"] for a in apps if not (a["has_default_icon_64"] or a["has_default_icon_256"])]
+    logger.info(
+        f"scan_all_apps 完成: roots={FNOS_APPS_ROOTS}, 应用数={len(apps)}, "
+        f"无图标应用={len(no_icon)} ({no_icon[:20]})"
+    )
+    logger.info(f"扫描到应用: {[a['name'] for a in apps]}")
     return apps
 
 
@@ -611,12 +626,17 @@ def get_app(appname):
 @app.route("/app/com.fntb.iconmgr/api/apps/<appname>/icon/<int:size>")
 def get_icon(appname, size):
     """获取应用图标（优先自定义，其次默认）"""
+    # v2.10.0: 归一化 appname + 日志（Web UI 会传带引号的 appname，如 %22trim.docs%22）
+    raw_appname = appname
+    appname = appname.strip().strip('"').strip("'")
     if size not in (64, 256):
         size = 256
+    logger.info(f"get_icon 请求: raw_appname={raw_appname!r} -> appname={appname!r} size={size}")
 
     # 优先自定义图标
     custom_path = get_custom_icon_path(appname, size)
     if _is_valid_icon_file(custom_path):
+        logger.info(f"get_icon 命中自定义图标: {appname} size={size}")
         return send_file(custom_path, mimetype="image/png")
 
     # 默认图标
@@ -625,8 +645,13 @@ def get_icon(appname, size):
         if a["name"] == appname:
             icon_path = get_app_icon_path(a["app_dir"], size)
             if _is_valid_icon_file(icon_path):
+                logger.info(f"get_icon 命中默认图标: {appname} size={size} path={icon_path}")
                 return send_file(icon_path, mimetype="image/png")
+            else:
+                logger.warning(f"get_icon 应用存在但图标无效: {appname} app_dir={a['app_dir']} icon_path={icon_path}")
 
+    logger.warning(f"get_icon 未找到: raw_appname={raw_appname!r} appname={appname!r} size={size} "
+                   f"(已扫描应用数={len(apps)}, 可用appname={[a['name'] for a in apps][:30]})")
     return jsonify({"error": "图标未找到"}), 404
 
 
@@ -634,6 +659,8 @@ def get_icon(appname, size):
 @app.route("/app/com.fntb.iconmgr/api/apps/<appname>/icon/default/<int:size>")
 def get_default_icon(appname, size):
     """获取默认图标（忽略自定义）"""
+    raw_appname = appname
+    appname = appname.strip().strip('"').strip("'")
     if size not in (64, 256):
         size = 256
 
@@ -644,6 +671,7 @@ def get_default_icon(appname, size):
             if _is_valid_icon_file(icon_path):
                 return send_file(icon_path, mimetype="image/png")
 
+    logger.warning(f"get_default_icon 未找到: raw_appname={raw_appname!r} appname={appname!r} size={size}")
     return jsonify({"error": "默认图标未找到"}), 404
 
 
@@ -828,14 +856,21 @@ def client_icon(appname, size):
     返回应用图标（优先自定义，其次默认）
     支持 size: 64, 128, 256, 512
     """
+    # v2.10.0: 归一化 appname（去掉引号/空白，处理 Web UI 传 %22 编码的情况）
+    raw_appname = appname
+    appname = appname.strip().strip('"').strip("'")
     if size not in (64, 128, 256, 512):
         size = 256
+
+    # v2.10.0: 解析过程日志，便于定位 404/空图标问题
+    logger.info(f"client_icon 请求: raw_appname={raw_appname!r} -> appname={appname!r} size={size}")
 
     # 优先自定义图标
     custom_path = get_custom_icon_path(appname, 256)
     if _is_valid_icon_file(custom_path):
         resp = _serve_icon_with_cache(custom_path, size, 256)
         if resp:
+            logger.info(f"client_icon 命中自定义图标: {appname} size={size} path={custom_path}")
             return resp
 
     # 默认图标
@@ -846,8 +881,13 @@ def client_icon(appname, size):
             if _is_valid_icon_file(icon_path):
                 resp = _serve_icon_with_cache(icon_path, size, 256 if size >= 256 else 64)
                 if resp:
+                    logger.info(f"client_icon 命中默认图标: {appname} size={size} path={icon_path}")
                     return resp
+            else:
+                logger.warning(f"client_icon 应用存在但图标无效: {appname} app_dir={a['app_dir']} icon_path={icon_path}")
 
+    logger.warning(f"client_icon 未找到: raw_appname={raw_appname!r} appname={appname!r} size={size} "
+                   f"(已扫描应用数={len(apps)}, 可用appname={[a['name'] for a in apps][:30]})")
     return jsonify({"error": "图标未找到"}), 404
 
 
@@ -886,7 +926,10 @@ def client_apps():
     apps = get_apps_cache()
     # 使用客户端请求的 host 构造 URL（支持代理/NAS 地址）
     nas_host = request.args.get("nas_host", "")
-    base_url = f"http://{nas_host}" if nas_host else request.url_root.rstrip("/")
+    base_url = request.url_root.rstrip("/")
+    # v2.10.0: 客户端列表请求日志（确认客户端确实调用了此 API）
+    logger.info(f"client_apps 请求: nas_host={nas_host!r} base_url={base_url} "
+                f"UA={request.headers.get('User-Agent', '')[:60]} 已扫描应用数={len(apps)}")
 
     result = []
     for a in apps:
@@ -914,8 +957,8 @@ def client_apps():
             "url": url,
             "has_custom_icon": a["has_custom_icon"],
         })
-
     resp = jsonify({"total": len(result), "list": result})
+    logger.info(f"client_apps 返回 {len(result)} 个应用 (name列表: {[a['name'] for a in apps][:40]})")
     return _add_cache_headers(resp, 300)  # 缓存5分钟
 
 
@@ -945,7 +988,7 @@ def run_server():
         "errorlog": "-",
         "loglevel": "info",
     }
-    logger.info(f"启动 FNTB 图标管理器 v2.7.0 on port {port}")
+    logger.info(f"启动 FNTB 图标管理器 v2.10.0 on port {port}")
     GunicornApp(app, options).run()
 
 
