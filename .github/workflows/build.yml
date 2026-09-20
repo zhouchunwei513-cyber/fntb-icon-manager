@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -20,11 +23,12 @@ jobs:
       - name: Build FPK
         run: |
           ./fnpack build
-          echo "FPK file:"
           ls -la *.fpk
 
-      - name: Create Release
+      - name: Create Release and Upload
         uses: softprops/action-gh-release@v2
         with:
           files: "*.fpk"
+          name: "${{ github.ref_name }}"
           generate_release_notes: true
+          fail_on_unmatched_files: true
