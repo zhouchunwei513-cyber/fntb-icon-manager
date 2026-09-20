@@ -25,10 +25,18 @@ jobs:
           ./fnpack build
           ls -la *.fpk
 
+      - name: Rename FPK with version
+        run: |
+          # 资产按「英文名+版本号」命名，如 com.fntb.iconmgr_v2.10.0.fpk
+          TAG="${{ github.ref_name }}"
+          VER="${TAG#v}"
+          mv com.fntb.iconmgr.fpk "com.fntb.iconmgr_v${VER}.fpk"
+          ls -la *.fpk
+
       - name: Create Release and Upload
         uses: softprops/action-gh-release@v2
         with:
-          files: "*.fpk"
+          files: "com.fntb.iconmgr_v*.fpk"
           name: "${{ github.ref_name }}"
           generate_release_notes: true
           fail_on_unmatched_files: true
