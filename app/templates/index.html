@@ -260,7 +260,14 @@
                 </div>
                 <div style="background:var(--bg);padding:12px;border-radius:8px;">
                     <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">版本号</div>
-                    <div id="csVersion" style="font-size:15px;font-weight:600;">v2.7.0</div>
+                    <div id="csVersion" style="font-size:15px;font-weight:600;">-</div>
+                </div>
+                <div style="background:var(--bg);padding:12px;border-radius:8px;">
+                    <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">PC 客户端连接</div>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <span id="csClientDot" style="width:10px;height:10px;border-radius:50%;background:#9ca3af;display:inline-block;"></span>
+                        <span id="csClient" style="font-size:15px;font-weight:600;color:#9ca3af;">未连接</span>
+                    </div>
                 </div>
                 <div style="background:var(--bg);padding:12px;border-radius:8px;">
                     <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">监听端口</div>
@@ -362,24 +369,56 @@ function getBasePath() {
     return "";
 }
 
-function saveNasHost() {
+// 当前 NAS 地址（服务端 config.json 加载，卸载应用后一并清除，不再残留浏览器 localStorage）
+let currentNasHost = "";
+
+async function saveNasHost() {
     const val = document.getElementById("nasHostInput").value.trim();
-    if (val) {
-        localStorage.setItem("nas_host", val);
-        document.getElementById("nasHostStatus").textContent = "已保存: " + val;
-        document.getElementById("nasHostStatus").style.color = "var(--success)";
-        toast("NAS 地址已保存", "success");
-    } else {
-        localStorage.removeItem("nas_host");
-        document.getElementById("nasHostStatus").textContent = "已清除";
+    try {
+        const basePath = getBasePath();
+        const resp = await fetch(basePath + "/api/config", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nas_host: val }),
+        });
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        currentNasHost = val;
+        if (val) {
+            document.getElementById("nasHostStatus").textContent = "已保存: " + val;
+            document.getElementById("nasHostStatus").style.color = "var(--success)";
+            toast("NAS 地址已保存到服务端", "success");
+        } else {
+            document.getElementById("nasHostStatus").textContent = "已清除";
+            document.getElementById("nasHostStatus").style.color = "var(--text-dim)";
+            toast("NAS 地址已清除", "success");
+        }
+        updateApiBaseUrl();
+    } catch (e) {
+        toast("保存失败: " + e.message, "error");
     }
+}
+
+// v2.12.0: NAS 地址从服务端 config.json 加载
+async function loadNasHost() {
+    try {
+        const basePath = getBasePath();
+        const resp = await fetch(basePath + "/api/config");
+        if (resp.ok) {
+            const cfg = await resp.json();
+            currentNasHost = (cfg && cfg.nas_host) || "";
+        }
+    } catch (_) {
+        currentNasHost = "";
+    }
+    const inp = document.getElementById("nasHostInput");
+    if (inp) inp.value = currentNasHost;
     updateApiBaseUrl();
 }
 
 function updateApiBaseUrl() {
     const baseUrl = window.location.origin;
     const basePath = getBasePath();
-    const nasHost = localStorage.getItem("nas_host") || "";
+    const nasHost = currentNasHost;
     let apiUrl;
     if (nasHost) {
         apiUrl = `http://${nasHost}${basePath}/api/client/apps?nas_host=${nasHost}`;
@@ -396,7 +435,7 @@ function updateApiBaseUrl() {
 }
 
 function showApiInfo() {
-    updateApiBaseUrl();
+    loadNasHost();
     const basePath = getBasePath();
     const tbody = document.getElementById("apiTableBody");
     tbody.innerHTML = API_ENDPOINTS.map(e => {
@@ -849,6 +888,7 @@ async function refreshStatus() {
 
 // ── Init ──
 loadApps();
+loadNasHost();
 </script>
 </body>
 </html>

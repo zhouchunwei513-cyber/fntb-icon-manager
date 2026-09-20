@@ -28,6 +28,28 @@ from gunicorn.app.base import BaseApplication
 # ── 配置 ──────────────────────────────────────────────
 APP_NAME = "com.fntb.iconmgr"
 APP_DIR = os.environ.get("TRIM_APPDEST", os.path.dirname(os.path.abspath(__file__)))
+
+# 自身版本号：优先从 manifest 读取，与 fnpack 打包的 manifest 保持一致
+def _load_self_version():
+    candidates = [
+        os.path.join(os.path.dirname(APP_DIR), "manifest"),  # 部署后 @appcenter/xxx/manifest
+        os.path.join(APP_DIR, "manifest"),                   # 开发目录兜底
+    ]
+    for _mp in candidates:
+        try:
+            if os.path.isfile(_mp):
+                with open(_mp, "r", encoding="utf-8") as _f:
+                    for _line in _f:
+                        _line = _line.strip()
+                        if _line.startswith("version="):
+                            _v = _line.split("=", 1)[1].strip()
+                            if _v:
+                                return _v
+        except Exception:
+            continue
+    return "2.12.0"
+
+VERSION = _load_self_version()
 # var 目录: TRIM_PKGVAR 优先，否则基于 APP_DIR 创建
 _pkgvar = os.environ.get("TRIM_PKGVAR", "").strip()
 if _pkgvar and os.path.isdir(_pkgvar):
@@ -49,6 +71,8 @@ for vol_path in sorted(glob.glob("/vol*/@appcenter")):
 CUSTOM_ICONS_DIR = os.path.join(VAR_DIR, "custom_icons")
 # 应用元数据缓存文件
 APPS_CACHE_FILE = os.path.join(VAR_DIR, "apps_cache.json")
+# 应用配置（NAS 地址等），存服务端以便卸载时一并清除
+CONFIG_FILE = os.path.join(VAR_DIR, "config.json")
 
 os.makedirs(CUSTOM_ICONS_DIR, exist_ok=True)
 os.makedirs(VAR_DIR, exist_ok=True)
@@ -84,12 +108,18 @@ def _track_request():
         # 跳过健康检查自身的请求
         if "health" not in path and "client/status" not in path:
             client_ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+            ua = request.headers.get("User-Agent", "") or ""
+            client_mark = (request.headers.get("X-FNOS-Client", "") or "").strip()
+            # 飞牛 PC 客户端标识：显式 X-FNOS-Client 头，或 UA 含 Electron/FNOS-Desktop
+            is_fnos_client = bool(client_mark) or ("electron" in ua.lower() or "fnos-desktop" in ua.lower())
             _recent_requests.append({
                 "time": datetime.now().isoformat(timespec="seconds"),
+                "ts": time.time(),
                 "ip": client_ip,
                 "method": request.method,
                 "path": path,
-                "user_agent": request.headers.get("User-Agent", "")[:80],
+                "user_agent": ua[:80],
+                "is_client": is_fnos_client,
             })
 
 # ── 工具函数 ──────────────────────────────────────────
@@ -385,6 +415,12 @@ def scan_all_apps():
             has_icon_64 = _is_valid_icon_file(icon_64)
             has_icon_256 = _is_valid_icon_file(icon_256)
 
+            # v2.12.0: 过滤已卸载残留——既无 manifest appname 声明、又无有效图标、也无 ui 配置的目录跳过
+            _manifest_declared = bool(manifest.get("appname", ""))
+            if not _manifest_declared and not has_icon_64 and not has_icon_256 and not ui_config:
+                logger.info(f"scan_all_apps 跳过疑似已卸载残留（无 manifest/图标/ui）: {app_dir}")
+                continue
+
             apps.append({
                 "name": appname,
                 "display_name": resolve_display_name(manifest, app_dir, appname),
@@ -480,7 +516,22 @@ def static_files(filename):
 @app.route("/api/health")
 @app.route("/app/com.fntb.iconmgr/api/health")
 def health():
-    return jsonify({"status": "ok", "version": "2.7.0"})
+    return jsonify({"status": "ok", "version": VERSION})
+
+
+def _detect_client_connection(window_seconds=300):
+    """
+    基于最近请求记录，判断是否有飞牛 PC 客户端在活跃连接。
+    客户端请求会带 X-FNOS-Client 头（或 UA 含 electron/fnos-desktop），
+    在 _track_request 中标记 is_client=True。
+    """
+    cutoff = time.time() - window_seconds
+    last_client_at = None
+    for r in reversed(list(_recent_requests)):
+        if r.get("is_client") and r.get("ts", 0) >= cutoff:
+            last_client_at = r.get("time")
+            break
+    return bool(last_client_at), last_client_at
 
 
 @app.route("/api/client/status")
@@ -503,9 +554,13 @@ def client_status():
     # 最近请求记录
     recent = list(_recent_requests)[-10:]  # 返回最近 10 条
 
+    # v2.12.0: 客户端连接真实检测（区分浏览器访问与飞牛 PC 客户端连接）
+    client_connected, last_client_at = _detect_client_connection()
+    total_client_requests = sum(1 for r in _recent_requests if r.get("is_client"))
+
     return jsonify({
         "status": "running",
-        "version": "2.7.0",
+        "version": VERSION,
         "port": port,
         "uptime": uptime_str,
         "uptime_seconds": uptime_seconds,
@@ -517,6 +572,9 @@ def client_status():
         "api_accessible": True,
         "app_name": APP_NAME,
         "var_dir": VAR_DIR,
+        "client_connected": client_connected,
+        "last_client_seen": last_client_at,
+        "total_client_requests": total_client_requests,
     })
 
 
@@ -597,7 +655,9 @@ def list_apps():
 @app.route("/app/com.fntb.iconmgr/api/refresh")
 def refresh():
     """刷新应用列表缓存"""
+    logger.info("refresh 手动刷新触发（来源 UA=%s）", request.headers.get("User-Agent", "")[:60])
     apps = refresh_cache()
+    logger.info(f"refresh 完成: 共扫描到 {len(apps)} 个应用")
     return jsonify({"total": len(apps)})
 
 
@@ -815,8 +875,11 @@ def batch_restore():
 # ── 客户端兼容 API ────────────────────────────────────
 
 def _add_cache_headers(response, max_age=3600):
-    """为响应添加缓存头"""
-    response.headers["Cache-Control"] = f"public, max-age={max_age}"
+    """为响应添加缓存头；max_age<=0 时强制 no-cache 让客户端立即刷新"""
+    if max_age and max_age > 0:
+        response.headers["Cache-Control"] = f"public, max-age={max_age}"
+    else:
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Access-Control-Allow-Origin"] = "*"
     return response
 
@@ -989,7 +1052,7 @@ def run_server():
         "errorlog": "-",
         "loglevel": "info",
     }
-    logger.info(f"启动 FNTB 图标管理器 v2.10.0 on port {port}")
+    logger.info(f"启动 FNTB 图标管理器 v{VERSION} on port {port}")
     GunicornApp(app, options).run()
 
 
