@@ -1,6 +1,7 @@
 #!/bin/bash
-# 卸载前：停止残留服务 + 清除所有旧数据（自定义图标/缓存/日志/虚拟环境/配置），
+# 卸载前：停止残留服务 + 清除所有旧数据（自定义图标/缓存/日志/虚拟环境/配置/临时目录），
 # 避免卸载后重装时旧数据、旧代码、旧进程残留导致“还是旧版/图标不更新”。
+# v2.17.0: 改为整体清空 TRIM_PKGVAR 数据目录，覆盖 placeholder_icons/_test_dir/error.log/access.log 等全部残留。
 set +e
 
 PID_FILE="${TRIM_PKGVAR}/app.pid"
@@ -21,17 +22,10 @@ if [ -n "${TRIM_APPDEST:-}" ]; then
 fi
 pkill -f "gunicorn.*server:app" 2>/dev/null
 
-# 3. 清除数据目录（TRIM_PKGVAR）下的旧数据
+# 3. 整体清空数据目录（TRIM_PKGVAR）：自定义图标、缓存、日志、venv、配置、临时目录全部清除
 if [ -n "${TRIM_PKGVAR:-}" ] && [ -d "$TRIM_PKGVAR" ]; then
-  rm -rf "${TRIM_PKGVAR}/custom_icons" 2>/dev/null
-  rm -rf "${TRIM_PKGVAR}/backup" 2>/dev/null
-  rm -rf "${TRIM_PKGVAR}/venv" 2>/dev/null
-  rm -f  "${TRIM_PKGVAR}/apps_cache.json" 2>/dev/null
-  rm -f  "${TRIM_PKGVAR}/server.log" 2>/dev/null
-  rm -f  "${TRIM_PKGVAR}/fntb.log" 2>/dev/null
-  rm -f  "${TRIM_PKGVAR}/app.log" 2>/dev/null
-  rm -f  "${TRIM_PKGVAR}/config.json" 2>/dev/null
-  rm -f  "${TRIM_PKGVAR}/app.pid" 2>/dev/null
+  # 先删除全部子项，再删除目录本身（fnOS 可能自动重建为空目录）
+  rm -rf "${TRIM_PKGVAR}" 2>/dev/null
 fi
 
 # 4. 清除配置目录（TRIM_PKGETC）下的旧配置

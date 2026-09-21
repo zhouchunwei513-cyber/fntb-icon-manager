@@ -45,27 +45,47 @@ APP_DIR = os.environ.get("TRIM_APPDEST", os.path.dirname(os.path.abspath(__file_
 
 # 自身版本号：优先从 manifest 读取，与 fnpack 打包的 manifest 保持一致
 def _load_self_version():
-    candidates = [
-        # v2.16.0: fnOS 部署后应用本体在 /vol3/@appcenter/xxx（APP_DIR），
-        # 但 manifest 实际随安装复制到 /var/apps/xxx/manifest（root 目录，fntb 有权限读）。
-        # 旧候选只查 APP_DIR 及其父目录，导致线上 health/status 一直报 vunknown。
-        os.path.join("/var/apps", APP_NAME, "manifest"),     # fnOS 标准安装目录（最优先）
-        os.path.join(os.path.dirname(APP_DIR), "manifest"),  # 部署后 @appcenter/xxx/manifest
-        os.path.join(APP_DIR, "manifest"),                   # 开发目录兜底
+    # v2.17.0: fnOS ��������Ӧ��װ�� /vol3/@appcenter/xxx��manifest ���ᷭ�Ƶ� /var/apps��
+    # ���ز��ԣ�1) VAR_DIR/version �ļ� 2) ���� FNTB_VERSION 3) manifest ����λ�� 4) BUILTIN_VERSION
+    BUILTIN_VERSION = "2.17.0"
+    _candidates = []
+    try:
+        _candidates.append(os.path.join(VAR_DIR, "version"))
+    except Exception:
+        pass
+    _env_v = os.environ.get("FNTB_VERSION", "").strip()
+    if _env_v:
+        _candidates.insert(0, "env:" + _env_v)
+    _candidates += [
+        os.path.join("/var/apps", APP_NAME, "manifest"),
+        os.path.join("/usr/local/apps/@appcenter", APP_NAME, "manifest"),
+        os.path.join(os.path.dirname(APP_DIR), "manifest"),
+        os.path.join(APP_DIR, "manifest"),
     ]
-    for _mp in candidates:
+    for _item in _candidates:
         try:
-            if os.path.isfile(_mp):
-                with open(_mp, "r", encoding="utf-8") as _f:
-                    for _line in _f:
-                        _line = _line.strip()
-                        if _line.startswith("version="):
-                            _v = _line.split("=", 1)[1].strip()
-                            if _v:
-                                return _v
+            if _item.startswith("env:"):
+                _v = _item.split(":", 1)[1].strip()
+                if _v:
+                    return _v
+            _mp = _item
+            if not os.path.isfile(_mp):
+                continue
+            with open(_mp, "r", encoding="utf-8") as _f:
+                for _line in _f:
+                    _line = _line.strip()
+                    if _line.startswith("version="):
+                        _v = _line.split("=", 1)[1].strip()
+                        if _v:
+                            return _v
+                with open(_mp, "r", encoding="utf-8") as _f2:
+                    _raw = _f2.read().strip()
+                    if _raw and (_raw.isdigit() or (len(_raw) < 20 and ("." in _raw or _raw[0].isdigit()))):
+                        return _raw
         except Exception:
             continue
-    return "unknown"
+    return BUILTIN_VERSION
+
 
 VERSION = _load_self_version()
 # var 目录: TRIM_PKGVAR 优先，否则基于 APP_DIR 创建
@@ -100,6 +120,23 @@ SYSTEM_APPS = {
     "trim-base": "系统基础",
     "trim.base": "系统基础",
 }
+# v2.17.0: ���б�չʾ�ĸ���������ϵͳ���ֻ��ʾ�ͻ�����ҳ���а�װ��Ӧ�á�
+# ���˱���/������Ӧ�ã�bunjs/nodejs/python/xte/npc �ȷǸ�ţӦ�ã���ЩĿ¼�� @appcenter �¶��Ǹ�ţ��Ӧ�á�
+RUNTIME_APP_BLACKLIST = {
+    "bunjs", "nodejs_v22", "nodejs_v24", "python312", "python311", "python310",
+    "xte", "npc", "fn-open-vm-tools", "open-vm-tools",
+    "trim-base", "trim.base", "trim.ai-runtime-amd-migraphx",
+    "trim.sync_server",
+}
+
+def _is_runtime_app(appname):
+    """�ж��Ƿ�Ϊ���б�Ӧ�ù��˵���ʱ��/�ⲿ������������ɸ��졣"""
+    if not appname:
+        return False
+    if appname in RUNTIME_APP_BLACKLIST:
+        return True
+    return False
+
 
 # 自定义图标存储目录
 CUSTOM_ICONS_DIR = os.path.join(VAR_DIR, "custom_icons")
@@ -602,6 +639,12 @@ def scan_all_apps():
 
             if appname in seen_names:
                 continue
+            # v2.17.0: ���˱���/�ⲿ����ʱ��Ӧ�ã����г��ֵ� bunjs/nodejs/python/xte/npc �ȣ�
+            if _is_runtime_app(appname):
+                logger.info(f"scan_all_apps ���˱���/����Ӧ��: {appname} (dir={app_dir})")
+                seen_names.add(appname)
+                continue
+
             seen_names.add(appname)
 
             # 读取 ui/config 获取启动信息和显示名称
@@ -864,6 +907,9 @@ def list_apps():
 
     result = []
     for a in apps:
+        # v2.17.0: ���˱���/����Ӧ�ã���������ҳ����װӦ���б�һ��
+        if _is_runtime_app(a.get("name", "")):
+            continue
         # 状态筛选
         if status_filter == "custom" and not a["has_custom_icon"]:
             continue
@@ -1318,6 +1364,10 @@ def client_apps():
 
     result = []
     for a in apps:
+        # v2.17.0: filter runtime/dependency apps, keep consistent with client home list
+        if _is_runtime_app(a.get("name", "")):
+            logger.info(f"client_apps filtered runtime app: {a.get('name', '')}")
+            continue
         protocol = a.get("protocol", "http")
         port = a.get("port", "")
         path = a.get("path", "/")
