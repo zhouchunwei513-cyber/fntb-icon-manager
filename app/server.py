@@ -1026,6 +1026,63 @@ def client_apps():
     return _add_cache_headers(resp, 300)  # 缓存5分钟
 
 
+# ── NAS 地址配置（服务端存储，卸载时随数据目录一并清除） ──
+
+def _load_config():
+    """读取服务端配置文件（config.json，存于 VAR_DIR）"""
+    try:
+        if os.path.isfile(CONFIG_FILE):
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+    except Exception as e:
+        logger.warning(f"读取 config.json 失败: {e}")
+    return {}
+
+
+def _save_config(data):
+    """保存服务端配置到 config.json"""
+    try:
+        os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        logger.error(f"保存 config.json 失败: {e}")
+        return False
+
+
+@app.route("/api/config", methods=["GET"])
+@app.route("/app/com.fntb.iconmgr/api/config", methods=["GET"])
+def get_config():
+    """读取 NAS 地址等客户端配置（服务端存储，避免浏览器 localStorage 残留）"""
+    cfg = _load_config()
+    logger.info(f"GET /api/config -> nas_host={cfg.get('nas_host', '')!r}")
+    return jsonify(cfg)
+
+
+@app.route("/api/config", methods=["POST"])
+@app.route("/app/com.fntb.iconmgr/api/config", methods=["POST"])
+def post_config():
+    """保存 NAS 地址等客户端配置到服务端 config.json（卸载时随数据目录清除）"""
+    try:
+        data = request.get_json(silent=True) or {}
+        nas_host = str(data.get("nas_host", "") or "").strip()
+        cfg = _load_config()
+        if nas_host:
+            cfg["nas_host"] = nas_host
+        else:
+            cfg.pop("nas_host", None)
+        if _save_config(cfg):
+            logger.info(f"POST /api/config 保存成功: nas_host={nas_host!r}")
+            return jsonify({"success": True, "msg": "已保存", "nas_host": nas_host})
+        return jsonify({"success": False, "msg": "保存失败"}), 500
+    except Exception as e:
+        logger.error(f"POST /api/config 异常: {e}")
+        return jsonify({"success": False, "msg": f"异常: {e}"}), 500
+
+
 # ── Gunicorn 启动 ─────────────────────────────────────
 
 class GunicornApp(BaseApplication):
