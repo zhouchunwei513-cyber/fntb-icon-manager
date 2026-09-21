@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """
-FNTB 图标管理器 v2.11.0 - fnOS 应用图标统一管理
+FNTB 图标管理器 v2.14.0 - fnOS 应用图标统一管理
 - 扫描 /var/apps/ 下所有应用
 - 读取每个应用的 manifest 和 ICON.PNG / ICON_256.PNG
-- 支持自定义图标替换和还原
+- 支持自定义图标替换和还原（v2.14.0: 自定义图标自动圆角化）
 - 提供统一图标 API: /api/icons/{appname}/{size}
 - 客户端兼容 API: /api/client/apps
 - v2.10.0: 增强诊断日志（图标解析过程/应用扫描详情/错误上下文）+ appname 去引号归一化
 - v2.11.0: 卸载时自动清除旧数据（数据目录/配置目录残留清理）
+- v2.13.0: 客户端连接检测窗口扩大 + 系统应用兜底注册 + 图标缓存策略优化
+- v2.14.0: 修复图标修改后客户端不刷新（图标缓存缩短为 60s + 条件请求）、
+           上传图标自动圆角（radius=22%）、系统应用补全（trim.setting/trim.app-center
+           /trim.docker/trim.backup-and-sync/trim.log-center/trim.file-manager.trash/
+           trim.resource-manager 兜底注册 + 占位图标）、连接检测窗口 300s→1800s、
+           全链路日志增强
 """
 import os
 import sys
@@ -22,7 +28,7 @@ from pathlib import Path
 from collections import deque
 from flask import Flask, request, jsonify, send_file, render_template
 from flask_cors import CORS
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from gunicorn.app.base import BaseApplication
 
 # ── 配置 ──────────────────────────────────────────────
@@ -67,6 +73,22 @@ for vol_path in sorted(glob.glob("/vol*/@appcenter")):
     if vol_path not in FNOS_APPS_ROOTS:
         FNOS_APPS_ROOTS.append(vol_path)
 
+# v2.14.0: fnOS 系统内置应用（非标准 FPK 安装，可能无 /var/apps 目录、无 manifest、
+# 无独立图标，但桌面/客户端必须显示）。目录存在时扫描自然补充图标；
+# 目录不存在时仍兜底注册，保证设置页/快捷方式面板可见。
+SYSTEM_APPS = {
+    "trim.setting": "系统设置",
+    "trim.app-center": "应用中心",
+    "trim.docker": "Docker",
+    "trim.backup-and-sync": "备份",
+    "trim.log-center": "日志中心",
+    "trim.file-manager.trash": "回收站",
+    "trim.resource-manager": "资源管理",
+    # 兼容旧目录名变体（trim-base 等）
+    "trim-base": "系统基础",
+    "trim.base": "系统基础",
+}
+
 # 自定义图标存储目录
 CUSTOM_ICONS_DIR = os.path.join(VAR_DIR, "custom_icons")
 # 应用元数据缓存文件
@@ -105,8 +127,8 @@ def _track_request():
     # 只追踪 API 请求，忽略静态资源和页面
     path = request.path
     if path.startswith("/api/") or path.startswith("/app/com.fntb.iconmgr/api/"):
-        # 跳过健康检查自身的请求
-        if "health" not in path and "client/status" not in path:
+        # 只跳过健康检查自身的请求（client/status 需记录，客户端心跳据此判定活跃）
+        if "health" not in path:
             client_ip = request.headers.get("X-Forwarded-For", request.remote_addr)
             ua = request.headers.get("User-Agent", "") or ""
             client_mark = (request.headers.get("X-FNOS-Client", "") or "").strip()
@@ -355,6 +377,85 @@ def get_custom_icon_path(appname, size=256):
     return os.path.join(CUSTOM_ICONS_DIR, appname, f"icon_{size}.png")
 
 
+def _round_corners(img, radius_ratio=0.22):
+    """
+    v2.14.0: 将图片处理为圆角（radius 为尺寸比例，默认 22% 类似 fnOS 应用图标风格）。
+    上传的图标一般是方图，客户端主页/桌面/任务栏显示时圆角更美观统一。
+    手动逐像素绘制圆角遮罩，兼容 NAS 上可能的老版本 Pillow（无 rounded_rectangle）。
+    """
+    try:
+        img = img.convert("RGBA")
+        w, h = img.size
+        radius = max(1, int(min(w, h) * radius_ratio))
+        mask = Image.new("L", (w, h), 255)
+        # 用 ImageDraw.rounded_rectangle（新版本），失败则逐像素手动圆角
+        try:
+            draw = ImageDraw.Draw(mask)
+            draw.rounded_rectangle([0, 0, w - 1, h - 1], radius=radius, fill=255)
+        except Exception:
+            mask = Image.new("L", (w, h), 255)
+            px = mask.load()
+            r2 = radius * radius
+            for y in range(radius):
+                for x in range(radius):
+                    d = (radius - x - 1) ** 2 + (radius - y - 1) ** 2
+                    if d > r2:
+                        px[x, y] = 0
+                        px[w - 1 - x, y] = 0
+                        px[x, h - 1 - y] = 0
+                        px[w - 1 - x, h - 1 - y] = 0
+        img.putalpha(mask)
+        return img
+    except Exception as e:
+        logger.warning(f"圆角处理失败，使用原图: {e}")
+        return img
+
+
+def _generate_placeholder_icon(appname, display_name, out_path, size=256):
+    """
+    v2.14.0: 为无图标的系统应用生成占位图标（圆角底色 + 首字/图标），
+    避免客户端设置页/快捷方式面板出现空白或透明文件夹占位。
+    """
+    try:
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        letter = (display_name or appname or "?").strip()[:1] or "?"
+        if not letter or letter in ("t", "T", "."):
+            # trim.* 系统应用取显示名首字（如 系统设置 -> 系）
+            letter = (display_name or "?").strip()[:1] or "?"
+        img = Image.new("RGBA", (size, size), (37, 99, 235, 255))  # 蓝色底
+        draw = ImageDraw.Draw(img)
+        # 简单字体绘制：使用默认字体，居中放首字符
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", int(size * 0.5))
+        except Exception:
+            try:
+                font = ImageFont.truetype("DejaVuSans-Bold.ttf", int(size * 0.5))
+            except Exception:
+                font = ImageFont.load_default()
+        try:
+            bbox = draw.textbbox((0, 0), letter, font=font)
+            tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+            draw.text(((size - tw) / 2 - bbox[0], (size - th) / 2 - bbox[1]), letter,
+                      fill=(255, 255, 255, 255), font=font)
+        except Exception:
+            pass
+        img = _round_corners(img, radius_ratio=0.22)
+        img.save(out_path, "PNG")
+        return out_path
+    except Exception as e:
+        logger.warning(f"占位图标生成失败 {appname}: {e}")
+        return None
+
+
+def ensure_placeholder_icon(appname, display_name="", size=256):
+    """确保系统应用存在占位图标，返回有效路径或 None"""
+    place_dir = os.path.join(VAR_DIR, "placeholder_icons")
+    out_path = os.path.join(place_dir, f"{appname}_{size}.png")
+    if _is_valid_icon_file(out_path):
+        return out_path
+    return _generate_placeholder_icon(appname, display_name, out_path, size)
+
+
 def has_custom_icon(appname):
     """检查是否有自定义图标"""
     custom_dir = os.path.join(CUSTOM_ICONS_DIR, appname)
@@ -444,6 +545,36 @@ def scan_all_apps():
 
     # 按显示名称排序
     apps.sort(key=lambda x: x.get("display_name", x["name"]))
+    # v2.14.0: 兜底注册系统内置应用（目录扫描不到的 fnOS 系统应用，
+    # 保证设置页/快捷方式面板/客户端任务栏能看到系统应用）
+    scanned_names = {a["name"] for a in apps}
+    for sys_name, sys_display in SYSTEM_APPS.items():
+        if sys_name in scanned_names:
+            continue
+        logger.info(f"scan_all_apps 兜底注册系统应用: {sys_name} ({sys_display})")
+        apps.append({
+            "name": sys_name,
+            "display_name": sys_display,
+            "version": "",
+            "desc": "fnOS 系统内置应用",
+            "source": "system",
+            "platform": "",
+            "install_type": "system",
+            "has_default_icon_64": False,
+            "has_default_icon_256": False,
+            "has_custom_icon": has_custom_icon(sys_name),
+            "app_dir": "",
+            "root_dir": "",
+            # PC 客户端兼容字段
+            "title": sys_display,
+            "protocol": "http",
+            "port": "",
+            "path": "/",
+            "applaunchname": "",
+        })
+        scanned_names.add(sys_name)
+    # 重新按显示名称排序
+    apps.sort(key=lambda x: x.get("display_name", x["name"]))
     # v2.10.0: 扫描统计日志，便于确认应用列表是否完整
     no_icon = [a["name"] for a in apps if not (a["has_default_icon_64"] or a["has_default_icon_256"])]
     logger.info(
@@ -519,11 +650,13 @@ def health():
     return jsonify({"status": "ok", "version": VERSION})
 
 
-def _detect_client_connection(window_seconds=300):
+def _detect_client_connection(window_seconds=1800):
     """
     基于最近请求记录，判断是否有飞牛 PC 客户端在活跃连接。
     客户端请求会带 X-FNOS-Client 头（或 UA 含 electron/fnos-desktop），
     在 _track_request 中标记 is_client=True。
+    v2.14.0: 窗口从 300s 扩大至 1800s（30 分钟）——客户端应用列表有 5 分钟缓存，
+    且用户可能隔较长时间才操作，300s 窗口导致误报"未连接"。
     """
     cutoff = time.time() - window_seconds
     last_client_at = None
@@ -557,6 +690,12 @@ def client_status():
     # v2.12.0: 客户端连接真实检测（区分浏览器访问与飞牛 PC 客户端连接）
     client_connected, last_client_at = _detect_client_connection()
     total_client_requests = sum(1 for r in _recent_requests if r.get("is_client"))
+    # v2.14.0: 连接检测详情日志（方便定位"未连接"误报）
+    logger.info(
+        f"client_status 连接检测: connected={client_connected} last_client_seen={last_client_at} "
+        f"total_client_requests={total_client_requests} "
+        f"recent_is_client={[r.get('is_client') for r in list(_recent_requests)[-5:]]}"
+    )
 
     return jsonify({
         "status": "running",
@@ -698,7 +837,7 @@ def get_icon(appname, size):
     custom_path = get_custom_icon_path(appname, size)
     if _is_valid_icon_file(custom_path):
         logger.info(f"get_icon 命中自定义图标: {appname} size={size}")
-        return send_file(custom_path, mimetype="image/png")
+        return _serve_icon_with_cache(custom_path, size, size)
 
     # 默认图标
     apps = get_apps_cache()
@@ -707,9 +846,15 @@ def get_icon(appname, size):
             icon_path = get_app_icon_path(a["app_dir"], size)
             if _is_valid_icon_file(icon_path):
                 logger.info(f"get_icon 命中默认图标: {appname} size={size} path={icon_path}")
-                return send_file(icon_path, mimetype="image/png")
+                return _serve_icon_with_cache(icon_path, size, size)
             else:
                 logger.warning(f"get_icon 应用存在但图标无效: {appname} app_dir={a['app_dir']} icon_path={icon_path}")
+
+    # v2.14.0: 系统应用/无图标应用返回占位图标
+    placeholder = ensure_placeholder_icon(appname, _find_display_name(appname))
+    if placeholder:
+        logger.info(f"get_icon 使用占位图标: {appname} size={size} path={placeholder}")
+        return _serve_icon_with_cache(placeholder, size, size)
 
     logger.warning(f"get_icon 未找到: raw_appname={raw_appname!r} appname={appname!r} size={size} "
                    f"(已扫描应用数={len(apps)}, 可用appname={[a['name'] for a in apps][:30]})")
@@ -730,7 +875,12 @@ def get_default_icon(appname, size):
         if a["name"] == appname:
             icon_path = get_app_icon_path(a["app_dir"], size)
             if _is_valid_icon_file(icon_path):
-                return send_file(icon_path, mimetype="image/png")
+                return _serve_icon_with_cache(icon_path, size, size)
+
+    # v2.14.0: 系统应用占位
+    placeholder = ensure_placeholder_icon(appname, _find_display_name(appname))
+    if placeholder:
+        return _serve_icon_with_cache(placeholder, size, size)
 
     logger.warning(f"get_default_icon 未找到: raw_appname={raw_appname!r} appname={appname!r} size={size}")
     return jsonify({"error": "默认图标未找到"}), 404
@@ -759,6 +909,16 @@ def upload_icon(appname):
         if img.format != "PNG":
             return jsonify({"error": "文件不是有效的 PNG 图片"}), 400
 
+        # v2.14.0: 日志增强——记录上传文件名/原始尺寸/来源
+        logger.info(
+            f"upload_icon 开始: appname={appname!r} 文件名={file.filename!r} "
+            f"原始尺寸={img.size} 模式={img.mode} UA={request.headers.get('User-Agent', '')[:60]}"
+        )
+
+        # v2.14.0: 圆角化处理（上传图标一般是方图）
+        img = _round_corners(img, radius_ratio=0.22)
+        logger.info(f"upload_icon 圆角化完成: appname={appname} 尺寸={img.size} 模式={img.mode}")
+
         # 保存 256 和 64 两个尺寸
         custom_dir = os.path.join(CUSTOM_ICONS_DIR, appname)
         os.makedirs(custom_dir, exist_ok=True)
@@ -773,18 +933,18 @@ def upload_icon(appname):
         img_64 = img.resize((64, 64), Image.LANCZOS)
         img_64.save(os.path.join(custom_dir, "icon_64.png"), "PNG")
 
-        # 更新缓存
+        # v2.14.0: 上传后立即清理缓存标记（客户端下次拉取即为新图标）
         get_apps_cache()
         for a in _apps_cache:
             if a["name"] == appname:
                 a["has_custom_icon"] = True
                 break
 
-        logger.info(f"自定义图标已保存: {appname}")
-        return jsonify({"message": "图标上传成功", "appname": appname})
+        logger.info(f"自定义图标已保存（圆角）: {appname} -> {custom_dir}")
+        return jsonify({"message": "图标上传成功", "appname": appname, "rounded": True})
 
     except Exception as e:
-        logger.error(f"图标上传失败 {appname}: {e}")
+        logger.error(f"图标上传失败 {appname}: {e}", exc_info=True)
         return jsonify({"error": f"处理失败: {str(e)}"}), 500
 
 
@@ -824,6 +984,13 @@ def batch_replace():
         if img.format != "PNG":
             return jsonify({"error": "仅支持 PNG 格式"}), 400
 
+        logger.info(
+            f"batch_replace 开始: 应用数={len(apps_list)} 文件名={file.filename!r} "
+            f"原始尺寸={img.size} UA={request.headers.get('User-Agent', '')[:60]}"
+        )
+        # v2.14.0: 批量替换同样圆角化
+        img = _round_corners(img, radius_ratio=0.22)
+
         success = []
         failed = []
         for appname in apps_list:
@@ -843,6 +1010,8 @@ def batch_replace():
             except Exception as e:
                 failed.append({"appname": appname, "error": str(e)})
 
+        logger.info(f"batch_replace 完成: success={len(success)} failed={len(failed)} "
+                    f"failed_list={failed[:10]}")
         return jsonify({
             "message": f"批量替换完成",
             "success": len(success),
@@ -850,6 +1019,7 @@ def batch_replace():
             "failed_list": failed,
         })
     except Exception as e:
+        logger.error(f"批量替换异常: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -892,24 +1062,32 @@ def _is_valid_icon_file(path):
         return False
 
 
-def _serve_icon_with_cache(icon_path, size, target_size=256):
-    """带缓存头发送图标文件，支持自动缩放"""
+def _serve_icon_with_cache(icon_path, size, target_size=256, max_age=60):
+    """
+    带缓存头发送图标文件，支持自动缩放。
+    v2.14.0: 默认 max_age 从 3600 缩短为 60 秒——用户修改图标后，
+    客户端/浏览器最多 1 分钟后即可看到新图标，避免旧图标缓存 1 小时。
+    请求带 ?t= / ?v= 时间戳参数时强制 no-cache（客户端强制刷新立即生效）。
+    """
     if not _is_valid_icon_file(icon_path):
         return None
+    # 请求带缓存破坏参数（t/v）时强制不缓存
+    if request.args.get("t") or request.args.get("v"):
+        max_age = 0
     if size == target_size or target_size in (256, 64):
-        resp = send_file(icon_path, mimetype="image/png", max_age=3600)
-        return _add_cache_headers(resp, 3600)
+        resp = send_file(icon_path, mimetype="image/png", max_age=max_age)
+        return _add_cache_headers(resp, max_age)
     try:
         img = Image.open(icon_path)
         img = img.resize((size, size), Image.LANCZOS)
         buf = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
         img.save(buf.name, "PNG")
         buf.close()
-        resp = send_file(buf.name, mimetype="image/png", max_age=3600)
-        return _add_cache_headers(resp, 3600)
+        resp = send_file(buf.name, mimetype="image/png", max_age=max_age)
+        return _add_cache_headers(resp, max_age)
     except Exception:
-        resp = send_file(icon_path, mimetype="image/png", max_age=3600)
-        return _add_cache_headers(resp, 3600)
+        resp = send_file(icon_path, mimetype="image/png", max_age=max_age)
+        return _add_cache_headers(resp, max_age)
 
 
 @app.route("/api/icons/<appname>/<int:size>")
@@ -929,7 +1107,7 @@ def client_icon(appname, size):
     # v2.10.0: 解析过程日志，便于定位 404/空图标问题
     logger.info(f"client_icon 请求: raw_appname={raw_appname!r} -> appname={appname!r} size={size}")
 
-    # 优先自定义图标
+    # 优先自定义图标（64 请求也回退到 256 源缩放）
     custom_path = get_custom_icon_path(appname, 256)
     if _is_valid_icon_file(custom_path):
         resp = _serve_icon_with_cache(custom_path, size, 256)
@@ -949,10 +1127,30 @@ def client_icon(appname, size):
                     return resp
             else:
                 logger.warning(f"client_icon 应用存在但图标无效: {appname} app_dir={a['app_dir']} icon_path={icon_path}")
+                break
+
+    # v2.14.0: 系统应用/无图标应用返回占位图标（避免客户端 404 后空白/透明占位）
+    placeholder = ensure_placeholder_icon(appname, _find_display_name(appname))
+    if placeholder:
+        logger.info(f"client_icon 使用占位图标: {appname} size={size} path={placeholder}")
+        resp = _serve_icon_with_cache(placeholder, size, 256)
+        if resp:
+            return resp
 
     logger.warning(f"client_icon 未找到: raw_appname={raw_appname!r} appname={appname!r} size={size} "
                    f"(已扫描应用数={len(apps)}, 可用appname={[a['name'] for a in apps][:30]})")
     return jsonify({"error": "图标未找到"}), 404
+
+
+def _find_display_name(appname):
+    """根据 appname 查找显示名（用于占位图标文字）"""
+    try:
+        for a in get_apps_cache():
+            if a["name"] == appname:
+                return a.get("display_name", appname)
+    except Exception:
+        pass
+    return SYSTEM_APPS.get(appname, appname)
 
 
 @app.route("/api/icons")
@@ -1001,12 +1199,13 @@ def client_apps():
         port = a.get("port", "")
         path = a.get("path", "/")
 
-        # 构造完整 URL
+        # 构造完整 URL（系统应用 port 为空时不拼端口）
+        _port_part = f":{port}" if port else ""
         if nas_host:
-            url = f"{protocol}://{nas_host}:{port}{path}"
+            url = f"{protocol}://{nas_host}{_port_part}{path}"
             icon_base = f"http://{nas_host}:18080"
         else:
-            url = f"{protocol}://{nas_host or request.host}:{port}{path}"
+            url = f"{protocol}://{nas_host or request.host}{_port_part}{path}"
             icon_base = base_url
 
         result.append({
@@ -1020,6 +1219,8 @@ def client_apps():
             "path": path,
             "url": url,
             "has_custom_icon": a["has_custom_icon"],
+            # v2.14.0: 标记系统应用（客户端可用于识别系统应用列表）
+            "system": a.get("install_type") == "system" or a.get("source") == "system",
         })
     resp = jsonify({"total": len(result), "list": result})
     logger.info(f"client_apps 返回 {len(result)} 个应用 (name列表: {[a['name'] for a in apps][:40]})")

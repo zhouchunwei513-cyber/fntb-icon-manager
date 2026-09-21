@@ -268,6 +268,8 @@
                         <span id="csClientDot" style="width:10px;height:10px;border-radius:50%;background:#9ca3af;display:inline-block;"></span>
                         <span id="csClient" style="font-size:15px;font-weight:600;color:#9ca3af;">未连接</span>
                     </div>
+                    <div style="font-size:11px;color:var(--text-dim);margin-top:4px;" id="csClientLast">—</div>
+                    <div style="font-size:11px;color:var(--text-dim);margin-top:2px;" id="csClientTotal">客户端请求数: 0</div>
                 </div>
                 <div style="background:var(--bg);padding:12px;border-radius:8px;">
                     <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">监听端口</div>
@@ -822,6 +824,31 @@ async function refreshStatus() {
         document.getElementById("csPort").textContent = data.port;
         document.getElementById("csUptime").textContent = data.uptime;
         document.getElementById("csTotalRequests").textContent = data.total_requests_tracked;
+
+        // v2.14.0: 客户端连接状态展示（PC 客户端显示"已连接/未连接"）
+        const clientDot = document.getElementById("csClientDot");
+        const clientEl = document.getElementById("csClient");
+        if (data.client_connected) {
+            clientDot.style.background = "#22c55e";
+            clientEl.textContent = "已连接";
+            clientEl.style.color = "#22c55e";
+            if (data.last_client_seen) {
+                clientEl.title = "最近活跃: " + data.last_client_seen;
+            }
+        } else {
+            clientDot.style.background = "#9ca3af";
+            clientEl.textContent = "未连接";
+            clientEl.style.color = "#9ca3af";
+            clientEl.title = "";
+        }
+        const clientLastEl = document.getElementById("csClientLast");
+        if (clientLastEl) {
+            clientLastEl.textContent = data.last_client_seen ? ("最近活跃: " + data.last_client_seen) : "—";
+        }
+        const clientTotalEl = document.getElementById("csClientTotal");
+        if (clientTotalEl) {
+            clientTotalEl.textContent = "客户端请求数: " + (data.total_client_requests || 0);
+        }
 
         // API 可访问性
         const apiEl = document.getElementById("csApiAccessible");
