@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FNTB 图标管理器 v2.14.0 - fnOS 应用图标统一管理
+FNTB 图标管理器 v2.16.0 - fnOS 应用图标统一管理
 - 扫描 /var/apps/ 下所有应用
 - 读取每个应用的 manifest 和 ICON.PNG / ICON_256.PNG
 - 支持自定义图标替换和还原（v2.14.0: 自定义图标自动圆角化）
@@ -14,6 +14,14 @@ FNTB 图标管理器 v2.14.0 - fnOS 应用图标统一管理
            /trim.docker/trim.backup-and-sync/trim.log-center/trim.file-manager.trash/
            trim.resource-manager 兜底注册 + 占位图标）、连接检测窗口 300s→1800s、
            全链路日志增强
+- v2.16.0: 修复线上 health/status 版本号 vunknown（_load_self_version 增加
+           /var/apps/com.fntb.iconmgr/manifest 最优先候选，fnOS 安装后 manifest 在
+           /var/apps 下而非 APP_DIR）；修复 client/status 连接误报"未连接"
+           （_recent_requests maxlen 20→500，页面刷新/批量探测不再挤出客户端心跳）；
+           修复系统应用图标误显示 fntb 自身图标（get_app_icon_path 空 app_dir 保护）；
+           修复第三方应用显示名误解析（FnMessageBot 被解析成"日志中心"——
+           _find_po_translation 系统集中式 locale 仅限 trim.* 应用，第三方只搜自身 locale）；
+           日志增强（resolve_display_name 输入日志等）
 """
 import os
 import sys
@@ -38,6 +46,10 @@ APP_DIR = os.environ.get("TRIM_APPDEST", os.path.dirname(os.path.abspath(__file_
 # 自身版本号：优先从 manifest 读取，与 fnpack 打包的 manifest 保持一致
 def _load_self_version():
     candidates = [
+        # v2.16.0: fnOS 部署后应用本体在 /vol3/@appcenter/xxx（APP_DIR），
+        # 但 manifest 实际随安装复制到 /var/apps/xxx/manifest（root 目录，fntb 有权限读）。
+        # 旧候选只查 APP_DIR 及其父目录，导致线上 health/status 一直报 vunknown。
+        os.path.join("/var/apps", APP_NAME, "manifest"),     # fnOS 标准安装目录（最优先）
         os.path.join(os.path.dirname(APP_DIR), "manifest"),  # 部署后 @appcenter/xxx/manifest
         os.path.join(APP_DIR, "manifest"),                   # 开发目录兜底
     ]
@@ -115,7 +127,9 @@ logger.info(f"fntb 版本 = {VERSION} (APP_DIR={APP_DIR})")
 
 # ── 请求追踪（客户端连接状态） ─────────────────────────
 _start_time = time.time()
-_recent_requests = deque(maxlen=20)  # 最近 20 条请求记录
+# v2.16.0: maxlen 20 -> 500——之前容量太小，页面刷新/批量探测会挤出客户端心跳记录，
+# 导致 client/status 误报"未连接"（即使 PC 客户端心跳每 4 分钟正常到达）。
+_recent_requests = deque(maxlen=500)  # 最近 500 条请求记录
 
 
 # ── Flask 应用 ────────────────────────────────────────
@@ -169,28 +183,34 @@ def get_app_title_from_ui_config(ui_config, applaunchname):
 
 
 def _find_po_translation(template_key, app_dir, appname):
-    """在多个位置搜索 PO 文件获取翻译"""
+    """在多个位置搜索 PO 文件获取翻译。
+    v2.16.0: 系统集中式 locale（/usr/trim、trim-base 等）只用于 fnOS 官方 trim.* 应用，
+    第三方应用仅搜索自身 locale——此前第三方应用（如 FnMessageBot）的 display_name
+    模板变量会误命中系统 locale 翻译（被解析成"日志中心"），导致应用列表名字显示不对。
+    """
     import re
 
-    # 搜索 PO 文件的目录列表（包含 fnOS 集中式 locale 目录）
+    # 应用自身 locale（所有应用都优先搜索）
     search_dirs = [
-        # 应用内目录
         os.path.join(app_dir, "resource", "locale"),
         os.path.join(app_dir, "locale"),
         os.path.join(app_dir, "lang"),
         os.path.join(app_dir, "resource", "lang"),
-        # fnOS 系统集中式 locale（翻译存在这里）
-        "/usr/trim/locale",
-        "/usr/trim/resource/locale",
-        "/var/apps/trim-base/resource/locale",
-        "/var/apps/trim-base/locale",
-        "/usr/local/share/locale",
     ]
-    # 也搜索 /vol*/@appcenter/trim-base 路径
-    for vol in ["/vol1", "/vol2", "/vol3", "/vol4"]:
-        search_dirs.append(f"{vol}/@appcenter/trim-base/resource/locale")
-        search_dirs.append(f"{vol}/@appcenter/trim-base/locale")
-    search_dirs.append("/usr/share/trim/locale")
+    # v2.16.0: 系统集中式 locale 仅限 fnOS 官方 trim.* 应用
+    if appname.startswith("trim."):
+        search_dirs += [
+            "/usr/trim/locale",
+            "/usr/trim/resource/locale",
+            "/var/apps/trim-base/resource/locale",
+            "/var/apps/trim-base/locale",
+            "/usr/local/share/locale",
+        ]
+        # 也搜索 /vol*/@appcenter/trim-base 路径
+        for vol in ["/vol1", "/vol2", "/vol3", "/vol4"]:
+            search_dirs.append(f"{vol}/@appcenter/trim-base/resource/locale")
+            search_dirs.append(f"{vol}/@appcenter/trim-base/locale")
+        search_dirs.append("/usr/share/trim/locale")
 
     po_files = ["zh_CN.po", "zh.po", "common.po", "messages.po", "zh_Hans.po", "zh-Hans.po"]
 
@@ -246,6 +266,10 @@ def resolve_display_name(manifest, app_dir, appname):
     raw = manifest.get("display_name", "")
     # 目录名作为备用 appname（有时 manifest appname 和目录名不同）
     dir_name = os.path.basename(app_dir)
+
+    # 记录解析输入（v2.16.0: 日志增强，便于定位显示名异常）
+    logger.info(f"resolve_display_name 输入: appname={appname!r} dir_name={dir_name!r} "
+                f"applaunchname={applaunchname!r} manifest.display_name={raw!r}")
 
     # 已知应用中文名映射（兜底方案，覆盖 fnOS 官方应用 + 常见第三方）
     KNOWN_NAMES = {
@@ -353,7 +377,12 @@ def read_manifest(app_dir):
 
 
 def get_app_icon_path(app_dir, size=256):
-    """获取应用默认图标路径（ICON.PNG/ICON_256.PNG 优先，其次 ui/images/ 桌面图标）"""
+    """获取应用默认图标路径（ICON.PNG/ICON_256.PNG 优先，其次 ui/images/ 桌面图标）。
+    v2.16.0: app_dir 为空（系统应用兜底注册）时返回空字符串——此前 os.path.join("", ...)
+    会生成相对路径 ui/images/icon-256.png，恰好命中 fntb 自身 ui 目录图标，
+    导致 trim.docker 等系统应用在客户端显示 fntb 自己的图标。"""
+    if not app_dir or not os.path.isdir(app_dir):
+        return ""
     if size == 64:
         candidates = [
             os.path.join(app_dir, "ICON.PNG"),
