@@ -27,16 +27,16 @@ jobs:
 
       - name: Rename FPK with version
         run: |
-          # 资产按「英文名+版本号」命名，如 com.fntb.iconmgr_v2.10.0.fpk
+          # v2.15.0: 产物名改为 fntb-icon-manager + 版本号（用户要求）
           TAG="${{ github.ref_name }}"
           VER="${TAG#v}"
-          mv com.fntb.iconmgr.fpk "com.fntb.iconmgr_v${VER}.fpk"
+          mv com.fntb.iconmgr.fpk "fntb-icon-manager_v${VER}.fpk"
           ls -la *.fpk
 
       - name: Create Release and Upload
         uses: softprops/action-gh-release@v2
         with:
-          files: "com.fntb.iconmgr_v*.fpk"
+          files: "fntb-icon-manager_v*.fpk"
           name: "${{ github.ref_name }}"
           generate_release_notes: true
           fail_on_unmatched_files: true

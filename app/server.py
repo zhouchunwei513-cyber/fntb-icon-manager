@@ -53,7 +53,7 @@ def _load_self_version():
                                 return _v
         except Exception:
             continue
-    return "2.12.0"
+    return "unknown"
 
 VERSION = _load_self_version()
 # var 目录: TRIM_PKGVAR 优先，否则基于 APP_DIR 创建
@@ -110,6 +110,8 @@ _sh = logging.StreamHandler(sys.stdout)
 _sh.setFormatter(_formatter)
 logger.addHandler(_sh)
 logger.info(f"VAR_DIR={VAR_DIR}, APP_DIR={APP_DIR}, CUSTOM_ICONS_DIR={CUSTOM_ICONS_DIR}")
+# v2.15.0: 记录自身版本号及来源，便于部署排查（若为 unknown 表示 manifest 读取失败）
+logger.info(f"fntb 版本 = {VERSION} (APP_DIR={APP_DIR})")
 
 # ── 请求追踪（客户端连接状态） ─────────────────────────
 _start_time = time.time()
@@ -375,6 +377,83 @@ def get_app_icon_path(app_dir, size=256):
 def get_custom_icon_path(appname, size=256):
     """获取自定义图标路径"""
     return os.path.join(CUSTOM_ICONS_DIR, appname, f"icon_{size}.png")
+
+
+# v2.15.0: 写回应用安装目录的 ICON.PNG / ICON_256.PNG——
+# 飞牛 NAS 主页/客户端主窗口加载应用图标读的是 NAS 自身路径
+# /static/app/icons/{appname}/icon.png（即应用安装目录的 ICON 文件），
+# 不是 fntb 的 /api/icons/。仅改自定义目录，客户端主页永远不会刷新。
+# 因此上传时除保存自定义图标外，同时写回应用安装目录，并备份原图标供还原。
+def _backup_app_icon(app_dir, appname):
+    """首次替换前把应用目录原始 ICON.PNG/ICON_256.PNG 备份到 custom_dir/original/"""
+    if not app_dir or not os.path.isdir(app_dir):
+        return False
+    try:
+        bak_dir = os.path.join(CUSTOM_ICONS_DIR, appname, "original")
+        os.makedirs(bak_dir, exist_ok=True)
+        for fname in ("ICON.PNG", "ICON_256.PNG"):
+            src = os.path.join(app_dir, fname)
+            if _is_valid_icon_file(src):
+                dst = os.path.join(bak_dir, fname)
+                if not os.path.exists(dst):
+                    shutil.copy2(src, dst)
+        return True
+    except Exception as e:
+        logger.warning(f"备份原始图标失败 {appname}: {e}")
+        return False
+
+
+def _write_back_app_icon(appname, img_64, img_256):
+    """v2.15.0: 把新图标写回应用安装目录（NAS 主页图标刷新关键）。
+    返回是否成功写回（系统应用无安装目录时返回 False，不影响自定义图标保存）。"""
+    try:
+        apps = get_apps_cache()
+        app_dir = ""
+        for a in apps:
+            if a["name"] == appname:
+                app_dir = a.get("app_dir", "")
+                break
+        if not app_dir or not os.path.isdir(app_dir):
+            logger.info(f"write_back_app_icon 无应用安装目录，跳过写回（仅自定义图标）: {appname}")
+            return False
+        _backup_app_icon(app_dir, appname)
+        # 64px -> ICON.PNG；256px -> ICON_256.PNG（同时写，兼容主页各尺寸）
+        p64 = os.path.join(app_dir, "ICON.PNG")
+        p256 = os.path.join(app_dir, "ICON_256.PNG")
+        img_64.save(p64, "PNG")
+        img_256.save(p256, "PNG")
+        logger.info(f"write_back_app_icon 已写回应用目录: {appname} -> {p64}, {p256}")
+        return True
+    except Exception as e:
+        logger.warning(f"write_back_app_icon 失败 {appname}: {e}")
+        return False
+
+
+def _restore_app_icon(appname):
+    """v2.15.0: 还原时把备份的原始图标恢复回应用安装目录；无备份则删除写回文件"""
+    try:
+        apps = get_apps_cache()
+        app_dir = ""
+        for a in apps:
+            if a["name"] == appname:
+                app_dir = a.get("app_dir", "")
+                break
+        if not app_dir or not os.path.isdir(app_dir):
+            return
+        bak_dir = os.path.join(CUSTOM_ICONS_DIR, appname, "original")
+        for fname in ("ICON.PNG", "ICON_256.PNG"):
+            dst = os.path.join(app_dir, fname)
+            bak = os.path.join(bak_dir, fname)
+            if os.path.exists(bak):
+                shutil.copy2(bak, dst)
+            elif os.path.exists(dst):
+                try:
+                    os.remove(dst)
+                except Exception:
+                    pass
+        logger.info(f"restore_app_icon 已还原应用目录图标: {appname}")
+    except Exception as e:
+        logger.warning(f"restore_app_icon 失败 {appname}: {e}")
 
 
 def _round_corners(img, radius_ratio=0.22):
@@ -940,8 +1019,11 @@ def upload_icon(appname):
                 a["has_custom_icon"] = True
                 break
 
-        logger.info(f"自定义图标已保存（圆角）: {appname} -> {custom_dir}")
-        return jsonify({"message": "图标上传成功", "appname": appname, "rounded": True})
+        # v2.15.0: 写回应用安装目录（NAS 主页/客户端主窗口图标刷新关键）
+        write_back = _write_back_app_icon(appname, img_64, img_256)
+
+        logger.info(f"自定义图标已保存（圆角）: {appname} -> {custom_dir} 写回应用目录={write_back}")
+        return jsonify({"message": "图标上传成功", "appname": appname, "rounded": True, "wrote_app_dir": write_back})
 
     except Exception as e:
         logger.error(f"图标上传失败 {appname}: {e}", exc_info=True)
@@ -955,6 +1037,9 @@ def restore_icon(appname):
     custom_dir = os.path.join(CUSTOM_ICONS_DIR, appname)
     if os.path.isdir(custom_dir):
         shutil.rmtree(custom_dir)
+
+    # v2.15.0: 还原应用安装目录图标（从备份恢复，无备份则删除写回文件）
+    _restore_app_icon(appname)
 
     # 更新缓存
     get_apps_cache()
@@ -993,6 +1078,7 @@ def batch_replace():
 
         success = []
         failed = []
+        wrote_app_dir = 0
         for appname in apps_list:
             try:
                 custom_dir = os.path.join(CUSTOM_ICONS_DIR, appname)
@@ -1006,16 +1092,21 @@ def batch_replace():
                 img_64 = img.resize((64, 64), Image.LANCZOS)
                 img_64.save(os.path.join(custom_dir, "icon_64.png"), "PNG")
 
+                # v2.15.0: 写回应用安装目录（NAS 主页图标刷新关键）
+                if _write_back_app_icon(appname, img_64, img_256):
+                    wrote_app_dir += 1
+
                 success.append(appname)
             except Exception as e:
                 failed.append({"appname": appname, "error": str(e)})
 
         logger.info(f"batch_replace 完成: success={len(success)} failed={len(failed)} "
-                    f"failed_list={failed[:10]}")
+                    f"wrote_app_dir={wrote_app_dir} failed_list={failed[:10]}")
         return jsonify({
             "message": f"批量替换完成",
             "success": len(success),
             "failed": len(failed),
+            "wrote_app_dir": wrote_app_dir,
             "failed_list": failed,
         })
     except Exception as e:
@@ -1037,8 +1128,11 @@ def batch_restore():
         custom_dir = os.path.join(CUSTOM_ICONS_DIR, appname)
         if os.path.isdir(custom_dir):
             shutil.rmtree(custom_dir)
+        # v2.15.0: 还原应用安装目录图标
+        _restore_app_icon(appname)
         success.append(appname)
 
+    logger.info(f"batch_restore 完成: count={len(success)} apps={success[:20]}")
     return jsonify({"message": "批量还原完成", "count": len(success)})
 
 

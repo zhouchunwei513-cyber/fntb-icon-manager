@@ -1,5 +1,5 @@
 appname=com.fntb.iconmgr
-version=2.14.0
+version=2.15.0
 display_name=FNTB图标管理器
 desc=飞牛应用图标批量管理工具，支持查看所有应用图标、自定义替换、还原默认图标，提供统一图标API供客户端调用
 platform=all
@@ -13,4 +13,4 @@ desktop_uidir=ui
 desktop_applaunchname=com.fntb.iconmgr.Application
 ctl_stop=true
 install_type=
-changelog=v2.14.0 修复图标修改后客户端不刷新(图标缓存60s+?t/?v强制no-cache), 上传图标自动圆角(radius=22%), 系统应用补全(trim.setting/trim.app-center/trim.docker/trim.backup-and-sync/trim.log-center/trim.file-manager.trash/trim.resource-manager 兜底注册+占位图标), 连接检测窗口300s->1800s, 前端连接状态展示, 全链路日志增强; v2.13.0 修复图标缺失格式, NAS地址服务端存储, 客户端连接真实检测, 自定义图标no-cache, 过滤卸载残留应用; v2.12.0 统一版本号输出, 客户端连接真实检测, 自定义图标no-cache, 过滤卸载残留应用, NAS地址服务端存储, 增强清单/刷新/客户端API日志; v2.11.0 卸载时自动清理旧数据; v2.10.0 增强诊断日志+appname去引号归一化; v2.9.0 修复manifest appname带引号导致客户端图标404, 0字节图标返回200空body, ui/images图标兜底; v2.8.0 修复trim.*系统应用manifest缺失(目录名兜底), 仍可提供图标和显示名; v2.7.0 新增客户端兼容API, HTTP缓存优化, 数据方式存储优化
+changelog=v2.15.0 图标上传/批量替换同时写回应用安装目录 ICON.PNG/ICON_256.PNG(NAS主页与客户端主窗口图标刷新关键, 备份原始图标, 还原时恢复), 版本号读取失败不再回退旧版(避免显示v2.12.0误导), 产物名改为fntb-icon-manager_v版本.fpk, 上传/还原/批量/客户端API全链路日志增强; v2.14.0 修复图标修改后客户端不刷新(图标缓存60s+?t/?v强制no-cache), 上传图标自动圆角(radius=22%), 系统应用补全(trim.setting/trim.app-center/trim.docker/trim.backup-and-sync/trim.log-center/trim.file-manager.trash/trim.resource-manager 兜底注册+占位图标), 连接检测窗口300s->1800s, 前端连接状态展示, 全链路日志增强; v2.13.0 修复图标缺失格式, NAS地址服务端存储, 客户端连接真实检测, 自定义图标no-cache, 过滤卸载残留应用; v2.12.0 统一版本号输出, 客户端连接真实检测, 自定义图标no-cache, 过滤卸载残留应用, NAS地址服务端存储, 增强清单/刷新/客户端API日志; v2.11.0 卸载时自动清理旧数据; v2.10.0 增强诊断日志+appname去引号归一化; v2.9.0 修复manifest appname带引号导致客户端图标404, 0字节图标返回200空body, ui/images图标兜底; v2.8.0 修复trim.*系统应用manifest缺失(目录名兜底), 仍可提供图标和显示名; v2.7.0 新增客户端兼容API, HTTP缓存优化, 数据方式存储优化
