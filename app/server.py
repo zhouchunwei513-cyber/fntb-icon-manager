@@ -53,21 +53,23 @@ APP_DIR = os.environ.get("TRIM_APPDEST", os.path.dirname(os.path.abspath(__file_
 def _load_self_version():
     # v2.17.0: fnOS ��������Ӧ��װ�� /vol3/@appcenter/xxx��manifest ���ᷭ�Ƶ� /var/apps��
     # ���ز��ԣ�1) VAR_DIR/version �ļ� 2) ���� FNTB_VERSION 3) manifest ����λ�� 4) BUILTIN_VERSION
-    BUILTIN_VERSION = "2.18.5"
+    BUILTIN_VERSION = "2.18.6"
+    # v2.18.6: VAR_DIR/version 是历史遗留文件（曾残留 2.18.0 误导面板版本显示），
+    # 优先级降到 manifest 之后；安装包 manifest 为真实版本来源。
     _candidates = []
-    try:
-        _candidates.append(os.path.join(VAR_DIR, "version"))
-    except Exception:
-        pass
     _env_v = os.environ.get("FNTB_VERSION", "").strip()
     if _env_v:
-        _candidates.insert(0, "env:" + _env_v)
+        _candidates.append("env:" + _env_v)
     _candidates += [
         os.path.join("/var/apps", APP_NAME, "manifest"),
         os.path.join("/usr/local/apps/@appcenter", APP_NAME, "manifest"),
         os.path.join(os.path.dirname(APP_DIR), "manifest"),
         os.path.join(APP_DIR, "manifest"),
     ]
+    try:
+        _candidates.append(os.path.join(VAR_DIR, "version"))
+    except Exception:
+        pass
     for _item in _candidates:
         try:
             if _item.startswith("env:"):
@@ -242,6 +244,68 @@ def _system_webui_icon_ok(appname):
         logger.info("系统应用官方图标可用: %s -> %s%s", appname, base,
                     SYSTEM_WEBUI_ICON_PATH.format(app=appname))
     return ok
+
+
+SYS_ICONS_DIR = os.path.join(VAR_DIR, "sys_icons")
+
+def _system_icon_cache_file(appname):
+    safe = "".join(c if (c.isalnum() or c in "._-") else "_" for c in str(appname))
+    return os.path.join(SYS_ICONS_DIR, safe + ".png")
+
+def _fetch_system_icon_file(appname):
+    """v2.18.6: 服务端代理下载 NAS 官方系统应用图标并缓存（sys_icons/）。
+    根因：get_icon 302 到 NAS webui 静态地址后，浏览器/客户端网络不可达该地址，
+    且 v2.18.4 302 分支 f-string 引用未定义 _nas_host 直接 NameError 500，
+    导致系统应用图标全部黑块。代理下载后直接返回图片字节，任何网络拓扑都有效。"""
+    try:
+        cached = _system_icon_cache_file(appname)
+        if _is_valid_icon_file(cached):
+            logger.info(f"sys_icon 缓存命中: {appname} -> {cached}")
+            return cached
+        base = _get_nas_webui_base()
+        if not base:
+            logger.warning(f"sys_icon 下载跳过(无 NAS webui base): {appname}")
+            return None
+        url = base + SYSTEM_WEBUI_ICON_PATH.format(app=appname)
+        try:
+            import urllib.request as _ur
+            req = _ur.Request(url, headers={"User-Agent": "fntb-iconmgr/2.18.6"})
+            with _ur.urlopen(req, timeout=5) as resp:
+                data = resp.read()
+        except Exception as e:
+            logger.warning(f"sys_icon 下载异常: {appname} url={url} err={e}")
+            return None
+        if not data or len(data) < 100:
+            logger.warning(f"sys_icon 下载数据无效: {appname} url={url} bytes={len(data) if data else 0}")
+            return None
+        os.makedirs(SYS_ICONS_DIR, exist_ok=True)
+        with open(cached, "wb") as f:
+            f.write(data)
+        logger.info(f"sys_icon 下载缓存成功: {appname} url={url} -> {cached} bytes={len(data)}")
+        return cached
+    except Exception as e:
+        logger.warning(f"sys_icon 代理异常: {appname} err={e}")
+        return None
+
+
+def _icon_version(appname):
+    """v2.18.6: 图标版本号（自定义/默认/系统缓存图标文件 mtime），拼进图标 URL 做缓存失效。
+    修改图标后 mtime 变化 -> URL 变化 -> 客户端/浏览器缓存自然失效。"""
+    try:
+        p = get_custom_icon_path(appname, 256)
+        if _is_valid_icon_file(p):
+            return int(os.path.getmtime(p))
+        for a in get_apps_cache():
+            if a["name"] == appname:
+                p2 = get_app_icon_path(a.get("app_dir") or "", 256)
+                if _is_valid_icon_file(p2):
+                    return int(os.path.getmtime(p2))
+        p3 = _system_icon_cache_file(appname)
+        if _is_valid_icon_file(p3):
+            return int(os.path.getmtime(p3))
+    except Exception:
+        pass
+    return 0
 
 
 def _public_host_for_redirect(nas_host, request):
@@ -1194,22 +1258,35 @@ def get_icon(appname, size):
     for a in apps:
         if a["name"] == appname and (not a.get("app_dir") or a.get("source") == "system"):
             if _system_webui_icon_ok(appname):
+                # v2.18.6: 服务端代理下载官方图标并直接返回字节
+                # （根因：302 目标浏览器不可达 + v2.18.4 f-string 引用未定义 _nas_host -> NameError 500 黑块）
+                sys_file = _fetch_system_icon_file(appname)
+                if sys_file:
+                    logger.info(f"get_icon 系统应用代理图标: {appname} size={size} path={sys_file}")
+                    resp = _serve_icon_with_cache(sys_file, size, size)
+                    if resp:
+                        return resp
+                    logger.warning(f"get_icon 系统代理图标 serve 失败: {appname} path={sys_file}")
+                # v2.18.6: 代理失败 fallback 302（修正 _nas_host 未定义 NameError）
                 base = _get_nas_webui_base()
                 if base:
-                    # v2.18.4: replace loopback host with client-reachable host
                     try:
-                        from urllib.parse import urlparse as _pu, urlunparse as _uu
+                        from urllib.parse import urlparse as _pu
+                        _cfg_nas_host = _load_config().get("nas_host", "")
                         _parsed = _pu(base)
-                        _ph = _public_host_for_redirect(_nas_host, request)
+                        _ph = _public_host_for_redirect(_cfg_nas_host, request)
                         if ":" in _ph.split("]")[-1]:
                             _pub_base = f"{_parsed.scheme or 'http'}://{_ph}"
                         else:
                             _pub_base = f"{_parsed.scheme or 'http'}://{_ph}:{_parsed.port or 5666}"
                         target = _pub_base + SYSTEM_WEBUI_ICON_PATH.format(app=appname)
-                    except Exception:
+                    except Exception as _e:
+                        logger.warning(f"get_icon 302 构造异常: {appname} err={_e}")
                         target = base + SYSTEM_WEBUI_ICON_PATH.format(app=appname)
-                    logger.info(f"get_icon system 302 -> {target} (base={base} _nas_host={_nas_host})")
+                    logger.info(f"get_icon system 302 -> {target} (base={base})")
                     return redirect(target, code=302)
+            else:
+                logger.info(f"get_icon 系统应用官方图标探测失败: {appname} -> 占位图标")
             break
 
     # v2.14.0: 系统应用/无图标应用返回占位图标
@@ -1477,7 +1554,7 @@ def _is_valid_icon_file(path):
         return False
 
 
-def _serve_icon_with_cache(icon_path, size, target_size=256, max_age=60):
+def _serve_icon_with_cache(icon_path, size, target_size=256, max_age=0):
     """
     带缓存头发送图标文件，支持自动缩放。
     v2.14.0: 默认 max_age 从 3600 缩短为 60 秒——用户修改图标后，
@@ -1548,22 +1625,34 @@ def client_icon(appname, size):
     for a in apps:
         if a["name"] == appname and (not a.get("app_dir") or a.get("source") == "system"):
             if _system_webui_icon_ok(appname):
+                # v2.18.6: 服务端代理下载官方图标并直接返回字节
+                sys_file = _fetch_system_icon_file(appname)
+                if sys_file:
+                    logger.info(f"client_icon 系统应用代理图标: {appname} size={size} path={sys_file}")
+                    resp = _serve_icon_with_cache(sys_file, size, 256)
+                    if resp:
+                        return resp
+                    logger.warning(f"client_icon 系统代理图标 serve 失败: {appname} path={sys_file}")
+                # v2.18.6: fallback 302（修正 nas_host 未定义 NameError）
                 base = _get_nas_webui_base()
                 if base:
-                    # v2.18.4: replace loopback host with client-reachable host
                     try:
-                        from urllib.parse import urlparse as _pu, urlunparse as _uu
+                        from urllib.parse import urlparse as _pu
+                        _cfg_nas_host = _load_config().get("nas_host", "")
                         _parsed = _pu(base)
-                        _ph = _public_host_for_redirect(nas_host, request)
+                        _ph = _public_host_for_redirect(_cfg_nas_host, request)
                         if ":" in _ph.split("]")[-1]:
                             _pub_base = f"{_parsed.scheme or 'http'}://{_ph}"
                         else:
                             _pub_base = f"{_parsed.scheme or 'http'}://{_ph}:{_parsed.port or 5666}"
                         target = _pub_base + SYSTEM_WEBUI_ICON_PATH.format(app=appname)
-                    except Exception:
+                    except Exception as _e:
+                        logger.warning(f"client_icon 302 构造异常: {appname} err={_e}")
                         target = base + SYSTEM_WEBUI_ICON_PATH.format(app=appname)
-                    logger.info(f"client_icon system 302 -> {target} (base={base} nas_host={nas_host})")
+                    logger.info(f"client_icon system 302 -> {target} (base={base})")
                     return redirect(target, code=302)
+            else:
+                logger.info(f"client_icon 系统应用官方图标探测失败: {appname} -> 占位图标")
             break
 
     # v2.14.0: 系统应用/无图标应用返回占位图标（避免客户端 404 后空白/透明占位）
@@ -1598,12 +1687,14 @@ def client_icons_list():
     base_url = request.url_root.rstrip("/")
     icons = []
     for a in apps:
+        # v2.18.6: 图标 URL 带 ?v=mtime 版本参数——修改图标后 URL 变化，缓存自然失效
+        _v = _icon_version(a["name"])
         icons.append({
             "name": a["name"],
             "display_name": a["display_name"],
             "title": a.get("title", "") or a["display_name"],
-            "icon": f"{base_url}/api/icons/{a['name']}/64",
-            "icon_256": f"{base_url}/api/icons/{a['name']}/256",
+            "icon": f"{base_url}/api/icons/{a['name']}/64?v={_v}",
+            "icon_256": f"{base_url}/api/icons/{a['name']}/256?v={_v}",
             "protocol": a.get("protocol", "http"),
             "tcp": a.get("protocol", "http"),
             "port": a.get("port", ""),
@@ -1611,7 +1702,8 @@ def client_icons_list():
             "url": f"{a.get('protocol', 'http')}://{a.get('port', '')}{a.get('path', '/')}",
             "has_custom_icon": has_custom_icon(a["name"]),
         })
-    return _add_cache_headers(jsonify({"total": len(icons), "icons": icons}), 300)
+    # v2.18.6: no-cache（此前 300s 缓存让客户端 5 分钟内看不到图标更新）
+    return _add_cache_headers(jsonify({"total": len(icons), "icons": icons}), 0)
 
 
 @app.route("/api/client/apps")
@@ -1697,11 +1789,13 @@ def client_apps():
             _phost2 = _public_host_for_redirect(nas_host, request)
             url = f"{protocol}://{_phost2}{_port_part}{path}"
 
+        # v2.18.6: 图标 URL 带 ?v=mtime 版本参数（缓存失效）
+        _v = _icon_version(a["name"])
         result.append({
             "name": a["name"],
             "title": a["display_name"],
-            "icon": f"{icon_base}/api/icons/{a['name']}/64",
-            "icon_256": f"{icon_base}/api/icons/{a['name']}/256",
+            "icon": f"{icon_base}/api/icons/{a['name']}/64?v={_v}",
+            "icon_256": f"{icon_base}/api/icons/{a['name']}/256?v={_v}",
             "protocol": protocol,
             "tcp": protocol,  # 兼容旧版
             "port": port,
@@ -1719,7 +1813,9 @@ def client_apps():
         json.dumps(
             [{"name": r["name"], "custom": r["has_custom_icon"], "system": r["system"], "url": r["url"]}
              for r in result], ensure_ascii=False)[:1500])
-    return _add_cache_headers(resp, 300)  # 缓存5分钟
+    # v2.18.6: no-cache——此前 5 分钟缓存导致客户端主页注入的自定义图标列表滞后
+    # （"修改图标后主页不更新"的根因之一）
+    return _add_cache_headers(resp, 0)
 
 
 # ── NAS 地址配置（服务端存储，卸载时随数据目录一并清除） ──
