@@ -53,7 +53,7 @@ APP_DIR = os.environ.get("TRIM_APPDEST", os.path.dirname(os.path.abspath(__file_
 def _load_self_version():
     # v2.17.0: fnOS ��������Ӧ��װ�� /vol3/@appcenter/xxx��manifest ���ᷭ�Ƶ� /var/apps��
     # ���ز��ԣ�1) VAR_DIR/version �ļ� 2) ���� FNTB_VERSION 3) manifest ����λ�� 4) BUILTIN_VERSION
-    BUILTIN_VERSION = "2.18.3"
+    BUILTIN_VERSION = "2.18.4"
     _candidates = []
     try:
         _candidates.append(os.path.join(VAR_DIR, "version"))
@@ -243,6 +243,28 @@ def _system_webui_icon_ok(appname):
                     SYSTEM_WEBUI_ICON_PATH.format(app=appname))
     return ok
 
+
+def _public_host_for_redirect(nas_host, request):
+    """v2.18.4 - client-reachable host. Priority: X-Forwarded-Host > nas_host > request.host > 127.0.0.1."""
+    try:
+        xfh = request.headers.get("X-Forwarded-Host", "").strip() if request else ""
+    except Exception:
+        xfh = ""
+    if xfh:
+        host = xfh.split(",")[0].strip().split("/")[0].split("?")[0]
+        if host:
+            return host
+    if nas_host:
+        h = str(nas_host).strip().rstrip("/")
+        if h:
+            return h.split("://", 1)[-1].split("/")[0].split("?")[0]
+    try:
+        rh = request.host if request else ""
+    except Exception:
+        rh = ""
+    if rh:
+        return str(rh).split("/")[0].split("?")[0]
+    return "127.0.0.1"
 
 RUNTIME_APP_BLACKLIST = {
     "bunjs", "nodejs_v22", "nodejs_v24", "python312", "python311", "python310",
@@ -1162,8 +1184,19 @@ def get_icon(appname, size):
             if _system_webui_icon_ok(appname):
                 base = _get_nas_webui_base()
                 if base:
-                    target = base + SYSTEM_WEBUI_ICON_PATH.format(app=appname)
-                    logger.info(f"get_icon 系统应用 302 官方图标: {appname} size={size} -> {target}")
+                    # v2.18.4: replace loopback host with client-reachable host
+                    try:
+                        from urllib.parse import urlparse as _pu, urlunparse as _uu
+                        _parsed = _pu(base)
+                        _ph = _public_host_for_redirect(_nas_host, request)
+                        if ":" in _ph.split("]")[-1]:
+                            _pub_base = f"{_parsed.scheme or 'http'}://{_ph}"
+                        else:
+                            _pub_base = f"{_parsed.scheme or 'http'}://{_ph}:{_parsed.port or 5666}"
+                        target = _pub_base + SYSTEM_WEBUI_ICON_PATH.format(app=appname)
+                    except Exception:
+                        target = base + SYSTEM_WEBUI_ICON_PATH.format(app=appname)
+                    logger.info(f"get_icon system 302 -> {target} (base={base} _nas_host={_nas_host})")
                     return redirect(target, code=302)
             break
 
@@ -1505,8 +1538,19 @@ def client_icon(appname, size):
             if _system_webui_icon_ok(appname):
                 base = _get_nas_webui_base()
                 if base:
-                    target = base + SYSTEM_WEBUI_ICON_PATH.format(app=appname)
-                    logger.info(f"client_icon 系统应用 302 官方图标: {appname} size={size} -> {target}")
+                    # v2.18.4: replace loopback host with client-reachable host
+                    try:
+                        from urllib.parse import urlparse as _pu, urlunparse as _uu
+                        _parsed = _pu(base)
+                        _ph = _public_host_for_redirect(nas_host, request)
+                        if ":" in _ph.split("]")[-1]:
+                            _pub_base = f"{_parsed.scheme or 'http'}://{_ph}"
+                        else:
+                            _pub_base = f"{_parsed.scheme or 'http'}://{_ph}:{_parsed.port or 5666}"
+                        target = _pub_base + SYSTEM_WEBUI_ICON_PATH.format(app=appname)
+                    except Exception:
+                        target = base + SYSTEM_WEBUI_ICON_PATH.format(app=appname)
+                    logger.info(f"client_icon system 302 -> {target} (base={base} nas_host={nas_host})")
                     return redirect(target, code=302)
             break
 
@@ -1600,37 +1644,46 @@ def client_apps():
 
         # 构造完整 URL（系统应用 port 为空时不拼端口）
         _port_part = f":{port}" if port else ""
+        # v2.18.4: icon_base uses client-reachable host (X-Forwarded-Host aware)
         if nas_host:
             icon_base = f"http://{nas_host}:18080"
         else:
-            icon_base = base_url
+            try:
+                _phost = _public_host_for_redirect(None, request)
+                icon_base = f"http://{_phost}" if ":" in _phost.split("]")[-1] else f"http://{_phost}:18080"
+            except Exception:
+                icon_base = base_url
         # v2.18.2: 系统应用（port/path 为空）若探测到 NAS webui，直接返回 appview URL，
         # 避免返回根地址让客户端二次解析时丢失协议头（快捷方式打不开/落到主页的根因）。
         if is_system and not port:
             webui_base = _get_nas_webui_base()
             if webui_base:
-                # v2.18.3: webui_base 是 NAS 容器内部回环地址（如 http://127.0.0.1:5666），
-                # Windows 客户端无法访问 127.0.0.1；改用客户端请求的 nas_host/request.host，
-                # 仅保留探测到的 webui 端口（5666），保证客户端可达。
-                _client_host = (nas_host or request.host).split(":")[0]
+                # v2.18.4: build client-reachable appview URL
                 try:
-                    _webui_port = urllib.parse.urlparse(webui_base).port or ""
+                    from urllib.parse import urlparse as _u0
+                    _wpu = _u0(webui_base)
+                    _phost = _public_host_for_redirect(nas_host, request)
+                    if ":" in _phost.split("]")[-1]:
+                        _sys_base = f"{_wpu.scheme or 'http'}://{_phost}"
+                    else:
+                        _sys_base = f"{_wpu.scheme or 'http'}://{_phost}:{_wpu.port or 5666}"
                 except Exception:
-                    _webui_port = ""
-                _sys_base = (f"http://{_client_host}:{_webui_port}"
-                             if _webui_port else f"http://{_client_host}")
+                    _phost = _public_host_for_redirect(nas_host, request)
+                    _sys_base = f"http://{_phost.split(':')[0]}:5666"
                 url = f"{_sys_base}/appview?anchor={urllib.parse.quote(a['name'])}"
                 logger.info(
-                    "client_apps 系统应用 URL -> %s (webui_base=%s client_host=%s webui_port=%s)",
-                    url, webui_base, _client_host, _webui_port)
+                    "client_apps system URL -> %s (webui_base=%s pub_host=%s)",
+                    url, webui_base, _phost)
             else:
-                url = f"{protocol}://{nas_host or request.host}{_port_part}{path}"
+                _phost2 = _public_host_for_redirect(nas_host, request)
+                url = f"{protocol}://{_phost2}{_port_part}{path}"
                 logger.warning(
-                    "client_apps 系统应用 %s 无 webui_base，返回根地址 %s", a["name"], url)
+                    "client_apps system %s no webui_base, fallback %s", a["name"], url)
         elif nas_host:
             url = f"{protocol}://{nas_host}{_port_part}{path}"
         else:
-            url = f"{protocol}://{nas_host or request.host}{_port_part}{path}"
+            _phost2 = _public_host_for_redirect(nas_host, request)
+            url = f"{protocol}://{_phost2}{_port_part}{path}"
 
         result.append({
             "name": a["name"],
