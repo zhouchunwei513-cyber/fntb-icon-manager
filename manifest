@@ -1,5 +1,5 @@
 appname=com.fntb.iconmgr
-version=2.18.4
+version=2.18.5
 display_name=FNTB图标管理器
 desc=飞牛应用图标批量管理工具，支持查看所有应用图标、自定义替换、还原默认图标，提供统一图标API供客户端调用
 platform=all
@@ -13,4 +13,4 @@ desktop_uidir=ui
 desktop_applaunchname=com.fntb.iconmgr.Application
 ctl_stop=true
 install_type=
-changelog=v2.18.4 修复系统应用图标302回环地址问题(127.0.0.1->客户端可达host via X-Forwarded-Host), 彻底修复面板/客户端系统应用图标加载失败; fntb面板icon_base也改用公网host
+changelog=v2.18.5 修复应用日志导不出：/api/logs请求的日志不存在时自动fallback到实际存在的server.log，返回available_files并记录接口调用日志；前端下拉框同步实际文件、导出用实际文件名 修复系统应用图标302回环地址问题(127.0.0.1->客户端可达host via X-Forwarded-Host), 彻底修复面板/客户端系统应用图标加载失败; fntb面板icon_base也改用公网host

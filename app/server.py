@@ -53,7 +53,7 @@ APP_DIR = os.environ.get("TRIM_APPDEST", os.path.dirname(os.path.abspath(__file_
 def _load_self_version():
     # v2.17.0: fnOS ��������Ӧ��װ�� /vol3/@appcenter/xxx��manifest ���ᷭ�Ƶ� /var/apps��
     # ���ز��ԣ�1) VAR_DIR/version �ļ� 2) ���� FNTB_VERSION 3) manifest ����λ�� 4) BUILTIN_VERSION
-    BUILTIN_VERSION = "2.18.4"
+    BUILTIN_VERSION = "2.18.5"
     _candidates = []
     try:
         _candidates.append(os.path.join(VAR_DIR, "version"))
@@ -1046,14 +1046,24 @@ def client_status():
 @app.route("/app/com.fntb.iconmgr/api/logs")
 def get_logs():
     """查看应用日志（供前端调试使用）"""
-    log_file = request.args.get("file", "fntb.log")
+    req_file = request.args.get("file", "fntb.log")
     # 安全防护：只允许读取日志文件
     allowed_files = {"fntb.log", "server.log", "error.log"}
-    if log_file not in allowed_files:
+    if req_file not in allowed_files:
         return jsonify({"error": "不允许访问该文件"}), 403
+    # v2.18.5: 请求的日志文件不存在时自动 fallback 到实际存在的日志文件（优先 server.log），
+    # 避免面板「应用日志」因默认请求 fntb.log 而报"日志文件不存在"导致日志导不出。
+    log_file = req_file
+    if not os.path.isfile(os.path.join(VAR_DIR, log_file)):
+        for cand in ("server.log", "fntb.log", "error.log"):
+            if os.path.isfile(os.path.join(VAR_DIR, cand)):
+                log_file = cand
+                break
     log_path = os.path.join(VAR_DIR, log_file)
     if not os.path.isfile(log_path):
         return jsonify({"error": "日志文件不存在", "var_dir": VAR_DIR}), 404
+    available_files = [f for f in sorted(os.listdir(VAR_DIR)) if f.endswith(".log")]
+    logger.info(f"GET /api/logs req_file={req_file} -> actual={log_file} available={available_files}")
     try:
         lines = request.args.get("lines", "200")
         max_lines = min(int(lines), 1000)
@@ -1066,6 +1076,8 @@ def get_logs():
             "total_lines": len(all_lines),
             "showing": len(recent),
             "lines": [l.rstrip("\n") for l in recent],
+            "available_files": available_files,
+            "fallback": log_file != req_file,
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500

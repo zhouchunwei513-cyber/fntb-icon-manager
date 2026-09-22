@@ -560,6 +560,19 @@ async function loadLogs() {
         } else {
             el.textContent = data.lines.join("\n") || "(日志为空)";
             dirEl.textContent = `日志目录: ${data.var_dir} | 共 ${data.total_lines} 行`;
+            if (data.file && document.getElementById("logFileSelect").value !== data.file) {
+                document.getElementById("logFileSelect").value = data.file;
+                dirEl.textContent += `（${file} 不存在，已自动切换到 ${data.file}）`;
+            }
+            if (data.available_files && data.available_files.length) {
+                const sel = document.getElementById("logFileSelect");
+                let html = "";
+                for (const f of ["fntb.log", "server.log", "error.log"]) {
+                    const exists = data.available_files.includes(f);
+                    html += `<option value="${f}" ${sel.value === f ? "selected" : ""}>${f}${exists ? "" : " (不存在)"}</option>`;
+                }
+                sel.innerHTML = html;
+            }
         }
     } catch(e) {
         el.textContent = `请求失败: ${e.message}`;
@@ -579,7 +592,8 @@ async function exportLogs() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `${file.replace(".log","")}_${new Date().toISOString().slice(0,19).replace(/:/g,"-")}.log`;
+        const actualFile = (data.file || file).replace(".log","");
+        a.download = `${actualFile}_${new Date().toISOString().slice(0,19).replace(/:/g,"-")}.log`;
         a.click();
         URL.revokeObjectURL(url);
     } catch(e) {
