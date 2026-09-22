@@ -14,6 +14,11 @@ FNTB 图标管理器 v2.16.0 - fnOS 应用图标统一管理
            /trim.docker/trim.backup-and-sync/trim.log-center/trim.file-manager.trash/
            trim.resource-manager 兜底注册 + 占位图标）、连接检测窗口 300s→1800s、
            全链路日志增强
+- v2.18.0: ① 修复 client_apps 忽略 status 过滤导致客户端主页注入全部应用（无自定义图标的
+           应用被替换成占位图，系统应用图标"显示异常"）；② 系统应用默认图标接入 fnOS 官方
+           webui 图标 /static/app/icons/{app}/icon.png（兜底注册 has_default_icon=True，
+           get_icon/client_icon 对系统应用 302 到官方图标，需配置 nas_webui 或自动探测）；
+           ③ custom_icons 目录异常子目录防护与日志；④ 全功能日志增强
 - v2.16.0: 修复线上 health/status 版本号 vunknown（_load_self_version 增加
            /var/apps/com.fntb.iconmgr/manifest 最优先候选，fnOS 安装后 manifest 在
            /var/apps 下而非 APP_DIR）；修复 client/status 连接误报"未连接"
@@ -34,7 +39,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from collections import deque
-from flask import Flask, request, jsonify, send_file, render_template
+from flask import Flask, request, jsonify, send_file, render_template, redirect
 from flask_cors import CORS
 from PIL import Image, ImageDraw, ImageFont
 from gunicorn.app.base import BaseApplication
@@ -47,7 +52,7 @@ APP_DIR = os.environ.get("TRIM_APPDEST", os.path.dirname(os.path.abspath(__file_
 def _load_self_version():
     # v2.17.0: fnOS ��������Ӧ��װ�� /vol3/@appcenter/xxx��manifest ���ᷭ�Ƶ� /var/apps��
     # ���ز��ԣ�1) VAR_DIR/version �ļ� 2) ���� FNTB_VERSION 3) manifest ����λ�� 4) BUILTIN_VERSION
-    BUILTIN_VERSION = "2.17.0"
+    BUILTIN_VERSION = "2.18.0"
     _candidates = []
     try:
         _candidates.append(os.path.join(VAR_DIR, "version"))
@@ -122,6 +127,98 @@ SYSTEM_APPS = {
 }
 # v2.17.0: ���б�չʾ�ĸ���������ϵͳ���ֻ��ʾ�ͻ�����ҳ���а�װ��Ӧ�á�
 # ���˱���/������Ӧ�ã�bunjs/nodejs/python/xte/npc �ȷǸ�ţӦ�ã���ЩĿ¼�� @appcenter �¶��Ǹ�ţ��Ӧ�á�
+# v2.18.0: fnOS 官方 webui 为系统/内置应用提供统一图标：
+#   GET /static/app/icons/{appname}/icon.png（已验证 trim.docker 等 7 个系统应用均 200）。
+# fntb 兜底注册的系统应用没有安装目录，无法写回 ICON 文件，因此：
+#   ① has_default_icon 改为探测 webui 官方图标可用性；
+#   ② get_icon/client_icon 对系统应用返回 302 重定向到官方图标（客户端 fetch 自动跟随）。
+# webui 地址来源优先级：config.json nas_webui > 环境变量 TRIM_NAS_WEBUI > nas_host 推断 > 自动探测。
+SYSTEM_WEBUI_ICON_PATH = "/static/app/icons/{app}/icon.png"
+
+_webui_base_cache = {"val": None, "ts": 0.0}
+_sys_icon_ok_cache = {}  # appname -> (ts, bool)
+
+def _probe_webui(base, app="trim.docker"):
+    """探测某 base 上系统应用官方图标是否可访问（短超时，不抛异常）。"""
+    import urllib.request
+    url = base.rstrip("/") + SYSTEM_WEBUI_ICON_PATH.format(app=app)
+    try:
+        req = urllib.request.Request(url, method="HEAD")
+        with urllib.request.urlopen(req, timeout=2) as r:
+            return r.status == 200
+    except Exception:
+        pass
+    try:
+        with urllib.request.urlopen(url, timeout=2) as r:
+            return r.status == 200 and int(r.headers.get("Content-Length", "0") or 0) > 0
+    except Exception:
+        return False
+
+def _get_nas_webui_base():
+    """返回可访问的 NAS webui 地址（http://host:port），探测失败返回 None（缓存 300s）。"""
+    now = time.time()
+    if _webui_base_cache["val"] is not None and now - _webui_base_cache["ts"] < 300:
+        return _webui_base_cache["val"]
+    candidates = []
+    # 1) config.json nas_webui
+    try:
+        cfg = _load_config()
+        w = str(cfg.get("nas_webui", "") or "").strip()
+        if w:
+            if not w.startswith("http"):
+                w = "http://" + w
+            candidates.append(w.rstrip("/"))
+        # 2) nas_host 推断 :10300
+        h = str(cfg.get("nas_host", "") or "").strip()
+        if h and ":" not in h:
+            candidates.append("http://" + h + ":10300")
+    except Exception:
+        pass
+    # 3) 环境变量
+    ev = os.environ.get("TRIM_NAS_WEBUI", "").strip()
+    if ev:
+        if not ev.startswith("http"):
+            ev = "http://" + ev
+        candidates.append(ev.rstrip("/"))
+    # 4) 常见本机/网关候选（fntb 与 webui 同宿主机或容器场景）
+    candidates += [
+        "http://127.0.0.1:10300",
+        "http://localhost:10300",
+        "http://host.docker.internal:10300",
+        "http://172.17.0.1:10300",
+        "http://172.18.0.1:10300",
+        "http://172.19.0.1:10300",
+        "http://172.20.0.1:10300",
+    ]
+    for base in candidates:
+        if _probe_webui(base):
+            logger.info("NAS webui 探测成功: %s", base)
+            _webui_base_cache["val"] = base
+            _webui_base_cache["ts"] = now
+            return base
+    _webui_base_cache["ts"] = now  # 300s 内不重复探测
+    logger.warning(
+        "NAS webui 探测失败（系统应用将使用占位图标，可在 config.json 配置 nas_webui）: candidates=%s",
+        candidates[:5])
+    return None
+
+def _system_webui_icon_ok(appname):
+    """系统应用官方图标是否可用（带 600s 缓存）。"""
+    base = _get_nas_webui_base()
+    if not base:
+        return False
+    now = time.time()
+    hit = _sys_icon_ok_cache.get(appname)
+    if hit and now - hit[0] < 600:
+        return hit[1]
+    ok = _probe_webui(base, app=appname)
+    _sys_icon_ok_cache[appname] = (now, ok)
+    if ok:
+        logger.info("系统应用官方图标可用: %s -> %s%s", appname, base,
+                    SYSTEM_WEBUI_ICON_PATH.format(app=appname))
+    return ok
+
+
 RUNTIME_APP_BLACKLIST = {
     "bunjs", "nodejs_v22", "nodejs_v24", "python312", "python311", "python310",
     "xte", "npc", "fn-open-vm-tools", "open-vm-tools",
@@ -159,6 +256,7 @@ _sh = logging.StreamHandler(sys.stdout)
 _sh.setFormatter(_formatter)
 logger.addHandler(_sh)
 logger.info(f"VAR_DIR={VAR_DIR}, APP_DIR={APP_DIR}, CUSTOM_ICONS_DIR={CUSTOM_ICONS_DIR}")
+_sanitize_custom_icons_dir()
 # v2.15.0: 记录自身版本号及来源，便于部署排查（若为 unknown 表示 manifest 读取失败）
 logger.info(f"fntb 版本 = {VERSION} (APP_DIR={APP_DIR})")
 
@@ -607,6 +705,32 @@ def has_custom_icon(appname):
     return os.path.isdir(custom_dir) and len(os.listdir(custom_dir)) > 0
 
 
+def _sanitize_custom_icons_dir():
+    """v2.18.0: 扫描 custom_icons 顶层，标记异常子目录（非应用名格式/已知垃圾项）。
+    仅记录日志不删除——防止历史版本数据残留（venv/backup/_test_dir 等）干扰排查，
+    也避免误删有效应用目录。"""
+    try:
+        if not os.path.isdir(CUSTOM_ICONS_DIR):
+            return
+        junk = []
+        for entry in sorted(os.listdir(CUSTOM_ICONS_DIR)):
+            full = os.path.join(CUSTOM_ICONS_DIR, entry)
+            if not os.path.isdir(full):
+                continue
+            if entry in ("venv", "backup", "_test_dir", "placeholder_icons", "custom_icons"):
+                junk.append(entry)
+                continue
+            if "/" in entry or "\\" in entry or entry.startswith("."):
+                junk.append(entry)
+        if junk:
+            logger.warning(
+                "custom_icons 目录存在异常子目录（不影响应用图标，建议在 NAS 上手动清理）: %s", junk)
+        else:
+            logger.info("custom_icons 目录结构正常")
+    except Exception as e:
+        logger.warning("custom_icons 目录扫描失败: %s", e)
+
+
 def scan_all_apps():
     """扫描所有已安装的 fnOS 应用"""
     apps = []
@@ -711,8 +835,8 @@ def scan_all_apps():
             "source": "system",
             "platform": "",
             "install_type": "system",
-            "has_default_icon_64": False,
-            "has_default_icon_256": False,
+            "has_default_icon_64": _system_webui_icon_ok(sys_name),
+            "has_default_icon_256": _system_webui_icon_ok(sys_name),
             "has_custom_icon": has_custom_icon(sys_name),
             "app_dir": "",
             "root_dir": "",
@@ -1003,6 +1127,17 @@ def get_icon(appname, size):
                 return _serve_icon_with_cache(icon_path, size, size)
             else:
                 logger.warning(f"get_icon 应用存在但图标无效: {appname} app_dir={a['app_dir']} icon_path={icon_path}")
+
+    # v2.18.0: 系统应用（无安装目录）302 到 NAS 官方 webui 图标
+    for a in apps:
+        if a["name"] == appname and (not a.get("app_dir") or a.get("source") == "system"):
+            if _system_webui_icon_ok(appname):
+                base = _get_nas_webui_base()
+                if base:
+                    target = base + SYSTEM_WEBUI_ICON_PATH.format(app=appname)
+                    logger.info(f"get_icon 系统应用 302 官方图标: {appname} size={size} -> {target}")
+                    return redirect(target, code=302)
+            break
 
     # v2.14.0: 系统应用/无图标应用返回占位图标
     placeholder = ensure_placeholder_icon(appname, _find_display_name(appname))
@@ -1298,6 +1433,17 @@ def client_icon(appname, size):
                 logger.warning(f"client_icon 应用存在但图标无效: {appname} app_dir={a['app_dir']} icon_path={icon_path}")
                 break
 
+    # v2.18.0: 系统应用（无安装目录）302 到 NAS 官方 webui 图标
+    for a in apps:
+        if a["name"] == appname and (not a.get("app_dir") or a.get("source") == "system"):
+            if _system_webui_icon_ok(appname):
+                base = _get_nas_webui_base()
+                if base:
+                    target = base + SYSTEM_WEBUI_ICON_PATH.format(app=appname)
+                    logger.info(f"client_icon 系统应用 302 官方图标: {appname} size={size} -> {target}")
+                    return redirect(target, code=302)
+            break
+
     # v2.14.0: 系统应用/无图标应用返回占位图标（避免客户端 404 后空白/透明占位）
     placeholder = ensure_placeholder_icon(appname, _find_display_name(appname))
     if placeholder:
@@ -1355,11 +1501,19 @@ def client_apps():
     字段: name, title, icon, protocol, port, path, url
     """
     apps = get_apps_cache()
+    # v2.18.0: status 过滤（custom=仅自定义图标应用，default=仅无自定义应用）
+    # 此前 client_apps 忽略 status 参数，客户端主页注入 refreshCustom 拉到的
+    # 是所有应用 -> 把所有匹配图标替换成 fntb 图标（无自定义的变成占位图），
+    # 这就是"系统应用图标显示异常 / 主页图标不对"的根因之一。
+    status_filter = request.args.get("status", "")
+    if status_filter not in ("", "custom", "default"):
+        status_filter = ""
     # 使用客户端请求的 host 构造 URL（支持代理/NAS 地址）
     nas_host = request.args.get("nas_host", "")
     base_url = request.url_root.rstrip("/")
     # v2.10.0: 客户端列表请求日志（确认客户端确实调用了此 API）
     logger.info(f"client_apps 请求: nas_host={nas_host!r} base_url={base_url} "
+                f"status_filter={status_filter!r} "
                 f"UA={request.headers.get('User-Agent', '')[:60]} 已扫描应用数={len(apps)}")
 
     result = []
@@ -1367,6 +1521,11 @@ def client_apps():
         # v2.17.0: filter runtime/dependency apps, keep consistent with client home list
         if _is_runtime_app(a.get("name", "")):
             logger.info(f"client_apps filtered runtime app: {a.get('name', '')}")
+            continue
+        # v2.18.0: status 过滤
+        if status_filter == "custom" and not a["has_custom_icon"]:
+            continue
+        if status_filter == "default" and a["has_custom_icon"]:
             continue
         protocol = a.get("protocol", "http")
         port = a.get("port", "")
@@ -1432,7 +1591,8 @@ def _save_config(data):
 def get_config():
     """读取 NAS 地址等客户端配置（服务端存储，避免浏览器 localStorage 残留）"""
     cfg = _load_config()
-    logger.info(f"GET /api/config -> nas_host={cfg.get('nas_host', '')!r}")
+    logger.info(f"GET /api/config -> nas_host={cfg.get('nas_host', '')!r} "
+                f"nas_webui={cfg.get('nas_webui', '')!r}")
     return jsonify(cfg)
 
 
@@ -1443,14 +1603,22 @@ def post_config():
     try:
         data = request.get_json(silent=True) or {}
         nas_host = str(data.get("nas_host", "") or "").strip()
+        nas_webui = str(data.get("nas_webui", "") or "").strip()
         cfg = _load_config()
         if nas_host:
             cfg["nas_host"] = nas_host
         else:
             cfg.pop("nas_host", None)
+        if nas_webui:
+            cfg["nas_webui"] = nas_webui
+        else:
+            cfg.pop("nas_webui", None)
+        # v2.18.0: 配置变化后清除 webui 探测缓存，下次请求重新探测
+        _webui_base_cache["val"] = None
         if _save_config(cfg):
-            logger.info(f"POST /api/config 保存成功: nas_host={nas_host!r}")
-            return jsonify({"success": True, "msg": "已保存", "nas_host": nas_host})
+            logger.info(f"POST /api/config 保存成功: nas_host={nas_host!r} nas_webui={nas_webui!r}")
+            return jsonify({"success": True, "msg": "已保存",
+                            "nas_host": nas_host, "nas_webui": nas_webui})
         return jsonify({"success": False, "msg": "保存失败"}), 500
     except Exception as e:
         logger.error(f"POST /api/config 异常: {e}")

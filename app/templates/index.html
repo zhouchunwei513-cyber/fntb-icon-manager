@@ -400,6 +400,36 @@ async function saveNasHost() {
     }
 }
 
+// v2.18.0: 系统图标源地址（NAS webui）——系统应用官方图标 /static/app/icons/{app}/icon.png
+// 所在服务地址。配置后 fntb 对系统应用（无自定义图标）返回 302 重定向到该地址，
+// 客户端/面板即可显示官方系统图标（替代占位图）。可留空，自动探测失败时仍用占位图。
+let currentNasWebui = "";
+
+async function saveNasWebui() {
+    const val = document.getElementById("nasWebuiInput").value.trim();
+    try {
+        const basePath = getBasePath();
+        const resp = await fetch(basePath + "/api/config", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nas_webui: val }),
+        });
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        currentNasWebui = val;
+        if (val) {
+            document.getElementById("nasWebuiStatus").textContent = "已保存: " + val;
+            document.getElementById("nasWebuiStatus").style.color = "var(--success)";
+            toast("系统图标源地址已保存（系统应用图标立即生效）", "success");
+        } else {
+            document.getElementById("nasWebuiStatus").textContent = "已清除（使用自动探测/占位图）";
+            document.getElementById("nasWebuiStatus").style.color = "var(--text-dim)";
+            toast("系统图标源地址已清除", "success");
+        }
+    } catch (e) {
+        toast("保存失败: " + e.message, "error");
+    }
+}
+
 // v2.12.0: NAS 地址从服务端 config.json 加载
 async function loadNasHost() {
     try {
@@ -408,12 +438,20 @@ async function loadNasHost() {
         if (resp.ok) {
             const cfg = await resp.json();
             currentNasHost = (cfg && cfg.nas_host) || "";
+            currentNasWebui = (cfg && cfg.nas_webui) || "";
         }
     } catch (_) {
         currentNasHost = "";
+        currentNasWebui = "";
     }
     const inp = document.getElementById("nasHostInput");
     if (inp) inp.value = currentNasHost;
+    const inpW = document.getElementById("nasWebuiInput");
+    if (inpW) inpW.value = currentNasWebui;
+    if (inpW && currentNasWebui) {
+        const stW = document.getElementById("nasWebuiStatus");
+        if (stW) { stW.textContent = "已保存: " + currentNasWebui; stW.style.color = "var(--success)"; }
+    }
     updateApiBaseUrl();
 }
 
