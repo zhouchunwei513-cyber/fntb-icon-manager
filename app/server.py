@@ -256,7 +256,6 @@ _sh = logging.StreamHandler(sys.stdout)
 _sh.setFormatter(_formatter)
 logger.addHandler(_sh)
 logger.info(f"VAR_DIR={VAR_DIR}, APP_DIR={APP_DIR}, CUSTOM_ICONS_DIR={CUSTOM_ICONS_DIR}")
-_sanitize_custom_icons_dir()
 # v2.15.0: 记录自身版本号及来源，便于部署排查（若为 unknown 表示 manifest 读取失败）
 logger.info(f"fntb 版本 = {VERSION} (APP_DIR={APP_DIR})")
 
@@ -729,6 +728,10 @@ def _sanitize_custom_icons_dir():
             logger.info("custom_icons 目录结构正常")
     except Exception as e:
         logger.warning("custom_icons 目录扫描失败: %s", e)
+
+
+# v2.18.0: 启动时执行 custom_icons 异常子目录扫描（仅日志）
+_sanitize_custom_icons_dir()
 
 
 def scan_all_apps():
