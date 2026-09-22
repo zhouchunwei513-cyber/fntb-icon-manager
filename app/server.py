@@ -53,7 +53,7 @@ APP_DIR = os.environ.get("TRIM_APPDEST", os.path.dirname(os.path.abspath(__file_
 def _load_self_version():
     # v2.17.0: fnOS ��������Ӧ��װ�� /vol3/@appcenter/xxx��manifest ���ᷭ�Ƶ� /var/apps��
     # ���ز��ԣ�1) VAR_DIR/version �ļ� 2) ���� FNTB_VERSION 3) manifest ����λ�� 4) BUILTIN_VERSION
-    BUILTIN_VERSION = "2.18.6"
+    BUILTIN_VERSION = "2.18.7"
     # v2.18.6: VAR_DIR/version 是历史遗留文件（曾残留 2.18.0 误导面板版本显示），
     # 优先级降到 manifest 之后；安装包 manifest 为真实版本来源。
     _candidates = []
@@ -269,7 +269,7 @@ def _fetch_system_icon_file(appname):
         url = base + SYSTEM_WEBUI_ICON_PATH.format(app=appname)
         try:
             import urllib.request as _ur
-            req = _ur.Request(url, headers={"User-Agent": "fntb-iconmgr/2.18.6"})
+            req = _ur.Request(url, headers={"User-Agent": "fntb-iconmgr/2.18.7"})
             with _ur.urlopen(req, timeout=5) as resp:
                 data = resp.read()
         except Exception as e:

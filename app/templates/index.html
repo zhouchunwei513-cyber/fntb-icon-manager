@@ -555,21 +555,20 @@ async function loadLogs() {
         const resp = await fetch(`${basePath}/api/logs?file=${file}&lines=500`);
         const data = await resp.json();
         if (data.error) {
-            el.textContent = `错误: ${data.error}\n\nvar 目录: ${data.var_dir || '未知'}\n\n如果日志文件不存在，说明应用刚刚启动或日志路径配置有误。`;
+            el.textContent = `错误: ${data.error}\n\nvar 目录: ${data.var_dir || '未知'}\n\n如果未看到日志文件，说明应用刚刚启动或日志路径配置有误。`;
             dirEl.textContent = "";
         } else {
             el.textContent = data.lines.join("\n") || "(日志为空)";
             dirEl.textContent = `日志目录: ${data.var_dir} | 共 ${data.total_lines} 行`;
             if (data.file && document.getElementById("logFileSelect").value !== data.file) {
                 document.getElementById("logFileSelect").value = data.file;
-                dirEl.textContent += `（${file} 不存在，已自动切换到 ${data.file}）`;
+                dirEl.textContent += `（${file} 未找到，已自动切换到 ${data.file}）`;
             }
             if (data.available_files && data.available_files.length) {
                 const sel = document.getElementById("logFileSelect");
                 let html = "";
                 for (const f of ["fntb.log", "server.log", "error.log"]) {
-                    const exists = data.available_files.includes(f);
-                    html += `<option value="${f}" ${sel.value === f ? "selected" : ""}>${f}${exists ? "" : " (不存在)"}</option>`;
+                    html += `<option value="${f}" ${sel.value === f ? "selected" : ""}>${f}</option>`;
                 }
                 sel.innerHTML = html;
             }
