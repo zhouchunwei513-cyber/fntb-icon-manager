@@ -42,6 +42,7 @@ from collections import deque
 from flask import Flask, request, jsonify, send_file, render_template, redirect
 from flask_cors import CORS
 from PIL import Image, ImageDraw, ImageFont
+import urllib.parse
 from gunicorn.app.base import BaseApplication
 
 # ── 配置 ──────────────────────────────────────────────
@@ -140,19 +141,26 @@ _sys_icon_ok_cache = {}  # appname -> (ts, bool)
 
 def _probe_webui(base, app="trim.docker"):
     """探测某 base 上系统应用官方图标是否可访问（短超时，不抛异常）。"""
+    ok, _ = _probe_webui_detail(base, app)
+    return ok
+
+
+def _probe_webui_detail(base, app="trim.docker"):
+    """探测某 base 上系统应用官方图标是否可访问。
+    返回 (ok, detail)，detail 为 HTTP 状态或异常信息，便于日志排查。"""
     import urllib.request
     url = base.rstrip("/") + SYSTEM_WEBUI_ICON_PATH.format(app=app)
     try:
         req = urllib.request.Request(url, method="HEAD")
         with urllib.request.urlopen(req, timeout=2) as r:
-            return r.status == 200
-    except Exception:
+            return r.status == 200, "HEAD %s" % r.status
+    except Exception as e:
         pass
     try:
         with urllib.request.urlopen(url, timeout=2) as r:
-            return r.status == 200 and int(r.headers.get("Content-Length", "0") or 0) > 0
-    except Exception:
-        return False
+            return (r.status == 200 and int(r.headers.get("Content-Length", "0") or 0) > 0), "GET %s" % r.status
+    except Exception as e:
+        return False, "%s: %s" % (type(e).__name__, e)
 
 def _get_nas_webui_base():
     """返回可访问的 NAS webui 地址（http://host:port），探测失败返回 None（缓存 300s）。"""
@@ -168,9 +176,10 @@ def _get_nas_webui_base():
             if not w.startswith("http"):
                 w = "http://" + w
             candidates.append(w.rstrip("/"))
-        # 2) nas_host 推断 :10300
+        # 2) nas_host 推断（v2.18.2: 官方 webui 端口 5666 优先，再试应用中心 10300）
         h = str(cfg.get("nas_host", "") or "").strip()
         if h and ":" not in h:
+            candidates.append("http://" + h + ":5666")
             candidates.append("http://" + h + ":10300")
     except Exception:
         pass
@@ -180,8 +189,15 @@ def _get_nas_webui_base():
         if not ev.startswith("http"):
             ev = "http://" + ev
         candidates.append(ev.rstrip("/"))
-    # 4) 常见本机/网关候选（fntb 与 webui 同宿主机或容器场景）
+    # 4) 常见本机/网关候选（fntb 与 webui 同宿主机或容器场景；v2.18.2: 补齐 5666 端口）
     candidates += [
+        "http://127.0.0.1:5666",
+        "http://localhost:5666",
+        "http://host.docker.internal:5666",
+        "http://172.17.0.1:5666",
+        "http://172.18.0.1:5666",
+        "http://172.19.0.1:5666",
+        "http://172.20.0.1:5666",
         "http://127.0.0.1:10300",
         "http://localhost:10300",
         "http://host.docker.internal:10300",
@@ -190,16 +206,25 @@ def _get_nas_webui_base():
         "http://172.19.0.1:10300",
         "http://172.20.0.1:10300",
     ]
+    # 去重保序
+    seen, uniq = set(), []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            uniq.append(c)
+    candidates = uniq
     for base in candidates:
-        if _probe_webui(base):
-            logger.info("NAS webui 探测成功: %s", base)
+        ok, detail = _probe_webui_detail(base)
+        if ok:
+            logger.info("NAS webui 探测成功: %s（系统应用图标将 302 官方地址）", base)
             _webui_base_cache["val"] = base
             _webui_base_cache["ts"] = now
             return base
+        logger.debug("NAS webui 探测失败候选: %s (%s)", base, detail)
     _webui_base_cache["ts"] = now  # 300s 内不重复探测
     logger.warning(
         "NAS webui 探测失败（系统应用将使用占位图标，可在 config.json 配置 nas_webui）: candidates=%s",
-        candidates[:5])
+        candidates)
     return None
 
 def _system_webui_icon_ok(appname):
@@ -1195,6 +1220,10 @@ def upload_icon(appname):
     if file.content_length and file.content_length > 2 * 1024 * 1024:
         return jsonify({"error": "文件超过 2MB"}), 400
 
+    # v2.18.2: appname 归一化——get_icon/client_icon 已 strip 引号，上传保存路径必须一致，
+    # 否则 has_custom_icon 检测目录与扫描 name 不一致 -> 面板显示新图标但 client_apps 仍 false
+    raw_appname = appname
+    appname = appname.strip().strip('"').strip("'")
     try:
         # 读取并验证 PNG
         img = Image.open(file)
@@ -1203,7 +1232,7 @@ def upload_icon(appname):
 
         # v2.14.0: 日志增强——记录上传文件名/原始尺寸/来源
         logger.info(
-            f"upload_icon 开始: appname={appname!r} 文件名={file.filename!r} "
+            f"upload_icon 开始: raw_appname={raw_appname!r} -> appname={appname!r} 文件名={file.filename!r} "
             f"原始尺寸={img.size} 模式={img.mode} UA={request.headers.get('User-Agent', '')[:60]}"
         )
 
@@ -1225,7 +1254,7 @@ def upload_icon(appname):
         img_64 = img.resize((64, 64), Image.LANCZOS)
         img_64.save(os.path.join(custom_dir, "icon_64.png"), "PNG")
 
-        # v2.14.0: 上传后立即清理缓存标记（客户端下次拉取即为新图标）
+        # v2.14.0: 上传后立即更新缓存标记（客户端下次拉取即为新图标）
         get_apps_cache()
         for a in _apps_cache:
             if a["name"] == appname:
@@ -1235,8 +1264,14 @@ def upload_icon(appname):
         # v2.15.0: 写回应用安装目录（NAS 主页/客户端主窗口图标刷新关键）
         write_back = _write_back_app_icon(appname, img_64, img_256)
 
-        logger.info(f"自定义图标已保存（圆角）: {appname} -> {custom_dir} 写回应用目录={write_back}")
-        return jsonify({"message": "图标上传成功", "appname": appname, "rounded": True, "wrote_app_dir": write_back})
+        # v2.18.2: 日志增强——打印实际保存路径、目录内容与 has_custom_icon 检测结果
+        custom_ok = os.path.isdir(custom_dir) and len(os.listdir(custom_dir)) > 0
+        logger.info(
+            f"自定义图标已保存（圆角）: appname={appname} -> {custom_dir} "
+            f"文件={os.listdir(custom_dir) if os.path.isdir(custom_dir) else []} "
+            f"写回应用目录={write_back} has_custom_icon={custom_ok}")
+        return jsonify({"message": "图标上传成功", "appname": appname, "rounded": True,
+                        "wrote_app_dir": write_back, "custom_dir": custom_dir, "has_custom_icon": custom_ok})
 
     except Exception as e:
         logger.error(f"图标上传失败 {appname}: {e}", exc_info=True)
@@ -1247,6 +1282,10 @@ def upload_icon(appname):
 @app.route("/app/com.fntb.iconmgr/api/apps/<appname>/icon/restore", methods=["POST"])
 def restore_icon(appname):
     """还原为默认图标"""
+    # v2.18.2: appname 归一化（与 upload_icon/get_icon 保持一致，避免带引号目录删错）
+    raw_appname = appname
+    appname = appname.strip().strip('"').strip("'")
+    logger.info(f"restore_icon 请求: raw_appname={raw_appname!r} -> appname={appname!r}")
     custom_dir = os.path.join(CUSTOM_ICONS_DIR, appname)
     if os.path.isdir(custom_dir):
         shutil.rmtree(custom_dir)
@@ -1292,7 +1331,9 @@ def batch_replace():
         success = []
         failed = []
         wrote_app_dir = 0
-        for appname in apps_list:
+        # v2.18.2: 批量 appname 归一化（与 upload_icon 一致，防带引号目录）
+        normalized_apps = [str(a).strip().strip('"').strip("'") for a in apps_list]
+        for appname in normalized_apps:
             try:
                 custom_dir = os.path.join(CUSTOM_ICONS_DIR, appname)
                 os.makedirs(custom_dir, exist_ok=True)
@@ -1312,6 +1353,16 @@ def batch_replace():
                 success.append(appname)
             except Exception as e:
                 failed.append({"appname": appname, "error": str(e)})
+
+        # v2.18.2: 更新内存缓存 has_custom_icon（否则批量替换后 client_apps 仍返回 false）
+        try:
+            get_apps_cache()
+            _norm_set = set(normalized_apps)
+            for a in _apps_cache:
+                if a["name"] in _norm_set:
+                    a["has_custom_icon"] = True
+        except Exception as _e:
+            logger.warning(f"batch_replace 更新缓存标记失败: {_e}")
 
         logger.info(f"batch_replace 完成: success={len(success)} failed={len(failed)} "
                     f"wrote_app_dir={wrote_app_dir} failed_list={failed[:10]}")
@@ -1337,13 +1388,25 @@ def batch_restore():
         return jsonify({"error": "未选择应用"}), 400
 
     success = []
-    for appname in apps_list:
+    # v2.18.2: 批量 appname 归一化
+    normalized_apps = [str(a).strip().strip('"').strip("'") for a in apps_list]
+    for appname in normalized_apps:
         custom_dir = os.path.join(CUSTOM_ICONS_DIR, appname)
         if os.path.isdir(custom_dir):
             shutil.rmtree(custom_dir)
         # v2.15.0: 还原应用安装目录图标
         _restore_app_icon(appname)
         success.append(appname)
+
+    # v2.18.2: 更新内存缓存 has_custom_icon
+    try:
+        get_apps_cache()
+        _norm_set = set(normalized_apps)
+        for a in _apps_cache:
+            if a["name"] in _norm_set:
+                a["has_custom_icon"] = False
+    except Exception as _e:
+        logger.warning(f"batch_restore 更新缓存标记失败: {_e}")
 
     logger.info(f"batch_restore 完成: count={len(success)} apps={success[:20]}")
     return jsonify({"message": "批量还原完成", "count": len(success)})
@@ -1533,15 +1596,30 @@ def client_apps():
         protocol = a.get("protocol", "http")
         port = a.get("port", "")
         path = a.get("path", "/")
+        is_system = a.get("install_type") == "system" or a.get("source") == "system"
 
         # 构造完整 URL（系统应用 port 为空时不拼端口）
         _port_part = f":{port}" if port else ""
         if nas_host:
-            url = f"{protocol}://{nas_host}{_port_part}{path}"
             icon_base = f"http://{nas_host}:18080"
         else:
-            url = f"{protocol}://{nas_host or request.host}{_port_part}{path}"
             icon_base = base_url
+        # v2.18.2: 系统应用（port/path 为空）若探测到 NAS webui，直接返回 appview URL，
+        # 避免返回根地址让客户端二次解析时丢失协议头（快捷方式打不开/落到主页的根因）。
+        if is_system and not port:
+            webui_base = _get_nas_webui_base()
+            if webui_base:
+                url = f"{webui_base}/appview?anchor={urllib.parse.quote(a['name'])}"
+                logger.info(
+                    "client_apps 系统应用 URL -> %s (webui_base=%s)", url, webui_base)
+            else:
+                url = f"{protocol}://{nas_host or request.host}{_port_part}{path}"
+                logger.warning(
+                    "client_apps 系统应用 %s 无 webui_base，返回根地址 %s", a["name"], url)
+        elif nas_host:
+            url = f"{protocol}://{nas_host}{_port_part}{path}"
+        else:
+            url = f"{protocol}://{nas_host or request.host}{_port_part}{path}"
 
         result.append({
             "name": a["name"],
@@ -1555,10 +1633,16 @@ def client_apps():
             "url": url,
             "has_custom_icon": a["has_custom_icon"],
             # v2.14.0: 标记系统应用（客户端可用于识别系统应用列表）
-            "system": a.get("install_type") == "system" or a.get("source") == "system",
+            "system": is_system,
         })
     resp = jsonify({"total": len(result), "list": result})
-    logger.info(f"client_apps 返回 {len(result)} 个应用 (name列表: {[a['name'] for a in apps][:40]})")
+    # v2.18.2: 修复日志打印错误（此前打印全量 apps 的 name 而非 result，28 vs 26 误导排查）
+    logger.info(
+        "client_apps 返回 %d 个应用: %s",
+        len(result),
+        json.dumps(
+            [{"name": r["name"], "custom": r["has_custom_icon"], "system": r["system"], "url": r["url"]}
+             for r in result], ensure_ascii=False)[:1500])
     return _add_cache_headers(resp, 300)  # 缓存5分钟
 
 
