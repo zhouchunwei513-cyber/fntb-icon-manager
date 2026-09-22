@@ -53,7 +53,7 @@ APP_DIR = os.environ.get("TRIM_APPDEST", os.path.dirname(os.path.abspath(__file_
 def _load_self_version():
     # v2.17.0: fnOS ��������Ӧ��װ�� /vol3/@appcenter/xxx��manifest ���ᷭ�Ƶ� /var/apps��
     # ���ز��ԣ�1) VAR_DIR/version �ļ� 2) ���� FNTB_VERSION 3) manifest ����λ�� 4) BUILTIN_VERSION
-    BUILTIN_VERSION = "2.18.0"
+    BUILTIN_VERSION = "2.18.3"
     _candidates = []
     try:
         _candidates.append(os.path.join(VAR_DIR, "version"))
@@ -1063,9 +1063,9 @@ def list_apps():
         if _is_runtime_app(a.get("name", "")):
             continue
         # 状态筛选
-        if status_filter == "custom" and not a["has_custom_icon"]:
+        if status_filter == "custom" and not has_custom_icon(a["name"]):
             continue
-        if status_filter == "default" and a["has_custom_icon"]:
+        if status_filter == "default" and has_custom_icon(a["name"]):
             continue
 
         # 搜索
@@ -1081,7 +1081,7 @@ def list_apps():
             "desc": a["desc"][:100] if a["desc"] else "",
             "source": a["source"],
             "has_default_icon": a["has_default_icon_256"] or a["has_default_icon_64"],
-            "has_custom_icon": a["has_custom_icon"],
+            "has_custom_icon": has_custom_icon(a["name"]),
             "protocol": a.get("protocol", "http"),
             "tcp": a.get("protocol", "http"),
             "port": a.get("port", ""),
@@ -1122,7 +1122,7 @@ def get_app(appname):
                 "platform": a["platform"],
                 "install_type": a["install_type"],
                 "has_default_icon": a["has_default_icon_256"] or a["has_default_icon_64"],
-                "has_custom_icon": a["has_custom_icon"],
+                "has_custom_icon": has_custom_icon(a["name"]),
                 "app_dir": a["app_dir"],
             })
     return jsonify({"error": "应用未找到"}), 404
@@ -1553,7 +1553,7 @@ def client_icons_list():
             "port": a.get("port", ""),
             "path": a.get("path", "/"),
             "url": f"{a.get('protocol', 'http')}://{a.get('port', '')}{a.get('path', '/')}",
-            "has_custom_icon": a["has_custom_icon"],
+            "has_custom_icon": has_custom_icon(a["name"]),
         })
     return _add_cache_headers(jsonify({"total": len(icons), "icons": icons}), 300)
 
@@ -1589,9 +1589,9 @@ def client_apps():
             logger.info(f"client_apps filtered runtime app: {a.get('name', '')}")
             continue
         # v2.18.0: status 过滤
-        if status_filter == "custom" and not a["has_custom_icon"]:
+        if status_filter == "custom" and not has_custom_icon(a["name"]):
             continue
-        if status_filter == "default" and a["has_custom_icon"]:
+        if status_filter == "default" and has_custom_icon(a["name"]):
             continue
         protocol = a.get("protocol", "http")
         port = a.get("port", "")
@@ -1609,9 +1609,20 @@ def client_apps():
         if is_system and not port:
             webui_base = _get_nas_webui_base()
             if webui_base:
-                url = f"{webui_base}/appview?anchor={urllib.parse.quote(a['name'])}"
+                # v2.18.3: webui_base 是 NAS 容器内部回环地址（如 http://127.0.0.1:5666），
+                # Windows 客户端无法访问 127.0.0.1；改用客户端请求的 nas_host/request.host，
+                # 仅保留探测到的 webui 端口（5666），保证客户端可达。
+                _client_host = (nas_host or request.host).split(":")[0]
+                try:
+                    _webui_port = urllib.parse.urlparse(webui_base).port or ""
+                except Exception:
+                    _webui_port = ""
+                _sys_base = (f"http://{_client_host}:{_webui_port}"
+                             if _webui_port else f"http://{_client_host}")
+                url = f"{_sys_base}/appview?anchor={urllib.parse.quote(a['name'])}"
                 logger.info(
-                    "client_apps 系统应用 URL -> %s (webui_base=%s)", url, webui_base)
+                    "client_apps 系统应用 URL -> %s (webui_base=%s client_host=%s webui_port=%s)",
+                    url, webui_base, _client_host, _webui_port)
             else:
                 url = f"{protocol}://{nas_host or request.host}{_port_part}{path}"
                 logger.warning(
@@ -1631,7 +1642,7 @@ def client_apps():
             "port": port,
             "path": path,
             "url": url,
-            "has_custom_icon": a["has_custom_icon"],
+            "has_custom_icon": has_custom_icon(a["name"]),
             # v2.14.0: 标记系统应用（客户端可用于识别系统应用列表）
             "system": is_system,
         })
