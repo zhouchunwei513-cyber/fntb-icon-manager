@@ -53,7 +53,7 @@ APP_DIR = os.environ.get("TRIM_APPDEST", os.path.dirname(os.path.abspath(__file_
 def _load_self_version():
     # v2.17.0: fnOS ��������Ӧ��װ�� /vol3/@appcenter/xxx��manifest ���ᷭ�Ƶ� /var/apps��
     # ���ز��ԣ�1) VAR_DIR/version �ļ� 2) ���� FNTB_VERSION 3) manifest ����λ�� 4) BUILTIN_VERSION
-    BUILTIN_VERSION = "2.18.7"
+    BUILTIN_VERSION = "2.18.8"
     # v2.18.6: VAR_DIR/version 是历史遗留文件（曾残留 2.18.0 误导面板版本显示），
     # 优先级降到 manifest 之后；安装包 manifest 为真实版本来源。
     _candidates = []
@@ -269,7 +269,7 @@ def _fetch_system_icon_file(appname):
         url = base + SYSTEM_WEBUI_ICON_PATH.format(app=appname)
         try:
             import urllib.request as _ur
-            req = _ur.Request(url, headers={"User-Agent": "fntb-iconmgr/2.18.7"})
+            req = _ur.Request(url, headers={"User-Agent": "fntb-iconmgr/2.18.8"})
             with _ur.urlopen(req, timeout=5) as resp:
                 data = resp.read()
         except Exception as e:
@@ -897,6 +897,7 @@ def scan_all_apps():
                         "protocol": entry.get("protocol", "http"),
                         "port": entry.get("port", ""),
                         "url": entry.get("url", "/"),
+                        "type": entry.get("type", ""),
                     }
 
             # 检查图标（0 字节视为无图标）
@@ -930,6 +931,7 @@ def scan_all_apps():
                 "port": launch_info.get("port", ""),
                 "path": launch_info.get("url", "/"),
                 "applaunchname": applaunchname,
+                "launch_type": launch_info.get("type", ""),
             })
 
     # 按显示名称排序
@@ -1803,6 +1805,8 @@ def client_apps():
             "url": url,
             "has_custom_icon": has_custom_icon(a["name"]),
             # v2.14.0: 标记系统应用（客户端可用于识别系统应用列表）
+            # v2.18.8 r15e: FPK ui/config 入口配置窗口类型透传（iframe=内嵌窗型 / url=跳出窗型）
+            "type": a.get("launch_type", ""),
             "system": is_system,
         })
     resp = jsonify({"total": len(result), "list": result})
