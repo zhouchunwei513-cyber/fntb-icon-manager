@@ -47,13 +47,14 @@ from gunicorn.app.base import BaseApplication
 
 # ── 配置 ──────────────────────────────────────────────
 APP_NAME = "com.fntb.iconmgr"
+# v2.18.9: 图标修改功能（替换/还原/批量）已暂时禁用——硬禁用、无开关，恢复需修改代码
 APP_DIR = os.environ.get("TRIM_APPDEST", os.path.dirname(os.path.abspath(__file__)))
 
 # 自身版本号：优先从 manifest 读取，与 fnpack 打包的 manifest 保持一致
 def _load_self_version():
     # v2.17.0: fnOS ��������Ӧ��װ�� /vol3/@appcenter/xxx��manifest ���ᷭ�Ƶ� /var/apps��
     # ���ز��ԣ�1) VAR_DIR/version �ļ� 2) ���� FNTB_VERSION 3) manifest ����λ�� 4) BUILTIN_VERSION
-    BUILTIN_VERSION = "2.18.8"
+    BUILTIN_VERSION = "2.18.9"
     # v2.18.6: VAR_DIR/version 是历史遗留文件（曾残留 2.18.0 误导面板版本显示），
     # 优先级降到 manifest 之后；安装包 manifest 为真实版本来源。
     _candidates = []
@@ -1331,6 +1332,8 @@ def get_default_icon(appname, size):
 @app.route("/app/com.fntb.iconmgr/api/apps/<appname>/icon", methods=["POST"])
 def upload_icon(appname):
     """上传自定义图标"""
+    # v2.18.9: 图标修改功能暂时禁用（维护中）——硬禁用、无开关，恢复需修改代码
+    return jsonify({"error": "图标修改功能维护中，暂时禁用"}), 403
     if "file" not in request.files:
         return jsonify({"error": "未找到文件"}), 400
 
@@ -1406,6 +1409,8 @@ def upload_icon(appname):
 @app.route("/app/com.fntb.iconmgr/api/apps/<appname>/icon/restore", methods=["POST"])
 def restore_icon(appname):
     """还原为默认图标"""
+    # v2.18.9: 图标修改功能暂时禁用（维护中）——硬禁用、无开关，恢复需修改代码
+    return jsonify({"error": "图标修改功能维护中，暂时禁用"}), 403
     # v2.18.2: appname 归一化（与 upload_icon/get_icon 保持一致，避免带引号目录删错）
     raw_appname = appname
     appname = appname.strip().strip('"').strip("'")
@@ -1432,6 +1437,8 @@ def restore_icon(appname):
 @app.route("/app/com.fntb.iconmgr/api/apps/batch/replace", methods=["POST"])
 def batch_replace():
     """批量替换图标"""
+    # v2.18.9: 图标修改功能暂时禁用（维护中）——硬禁用、无开关，恢复需修改代码
+    return jsonify({"error": "图标修改功能维护中，暂时禁用"}), 403
     if "file" not in request.files:
         return jsonify({"error": "未找到文件"}), 400
 
@@ -1506,6 +1513,8 @@ def batch_replace():
 @app.route("/app/com.fntb.iconmgr/api/apps/batch/restore", methods=["POST"])
 def batch_restore():
     """批量还原图标"""
+    # v2.18.9: 图标修改功能暂时禁用（维护中）——硬禁用、无开关，恢复需修改代码
+    return jsonify({"error": "图标修改功能维护中，暂时禁用"}), 403
     data = request.get_json()
     apps_list = data.get("apps", []) if data else []
     if not apps_list:

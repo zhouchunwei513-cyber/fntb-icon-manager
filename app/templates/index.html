@@ -106,8 +106,8 @@
             <button class="btn" onclick="showLogs()">📋 日志</button>
             <button class="btn" onclick="showApiInfo()">📡 API</button>
             <button class="btn" onclick="refreshApps()">🔄 刷新</button>
-            <button class="btn btn-primary" onclick="openBatchReplace()">📦 批量替换</button>
-            <button class="btn btn-danger" onclick="openBatchRestore()">↩️ 批量还原</button>
+            <button class="btn btn-primary" onclick="openBatchReplace()" disabled title="图标修改功能维护中，暂时禁用" style="opacity:0.45;cursor:not-allowed;">📦 批量替换</button>
+            <button class="btn btn-danger" onclick="openBatchRestore()" disabled title="图标修改功能维护中，暂时禁用" style="opacity:0.45;cursor:not-allowed;">↩️ 批量还原</button>
         </div>
     </div>
 
@@ -344,6 +344,7 @@
 <script>
 let currentFilter = "";
 let allApps = [];
+// v2.18.9: 图标修改功能（替换/还原/批量）已暂时禁用——硬禁用、无开关，入口函数直接拦截
 let replaceTarget = null;
 let batchMode = "replace";
 let batchSelectedFile = null;
@@ -357,8 +358,8 @@ const API_ENDPOINTS = [
     { method: "GET", path: "/api/icons/{appname}/{size}", desc: "获取指定应用图标（64/128/256/512）" },
     { method: "GET", path: "/api/apps", desc: "获取完整应用列表（含元信息）" },
     { method: "GET", path: "/api/health", desc: "健康检查" },
-    { method: "POST", path: "/api/apps/{name}/icon", desc: "上传自定义图标" },
-    { method: "POST", path: "/api/apps/{name}/icon/restore", desc: "还原默认图标" },
+    { method: "POST", path: "/api/apps/{name}/icon", desc: "上传自定义图标（v2.18.9 起维护中，暂时禁用）" },
+    { method: "POST", path: "/api/apps/{name}/icon/restore", desc: "还原默认图标（v2.18.9 起维护中，暂时禁用）" },
 ];
 
 // 检测当前访问的基础路径（支持 NAS 反向代理）
@@ -650,8 +651,8 @@ function renderApps() {
             </div>
             <div class="card-status">${statusBadge}</div>
             <div class="card-actions">
-                <button class="btn btn-primary" onclick="openReplace('${escAttr(a.name)}')">🖼️ 替换</button>
-                <button class="btn" onclick="restoreIcon('${escAttr(a.name)}')" ${!a.has_custom_icon ? 'disabled style="opacity:0.4"' : ''}>↩️ 还原</button>
+                <button class="btn btn-primary" onclick="openReplace('${escAttr(a.name)}')" disabled title="图标修改功能维护中，暂时禁用" style="opacity:0.45;cursor:not-allowed;">🖼️ 替换</button>
+                <button class="btn" onclick="restoreIcon('${escAttr(a.name)}')" disabled title="图标修改功能维护中，暂时禁用" style="opacity:0.45;cursor:not-allowed;">↩️ 还原</button>
             </div>
         </div>`;
     }).join("");
@@ -677,6 +678,7 @@ function refreshApps() {
 
 // ─ Replace ──
 function openReplace(appname) {
+    toast("图标修改功能维护中，暂时禁用", "error"); return; // v2.18.9 硬禁用
     replaceTarget = { appname };
     document.getElementById("replaceModalApp").textContent = `应用: ${appname}`;
     document.getElementById("uploadPreview").style.display = "none";
@@ -700,6 +702,7 @@ function onFileSelected(input) {
 }
 
 async function confirmReplace() {
+    toast("图标修改功能维护中，暂时禁用", "error"); return; // v2.18.9 硬禁用
     if (!replaceTarget) return;
     const file = document.getElementById("fileInput").files[0];
     if (!file) return;
@@ -719,6 +722,7 @@ async function confirmReplace() {
 }
 
 async function useDefaultIcon() {
+    toast("图标修改功能维护中，暂时禁用", "error"); return; // v2.18.9 硬禁用
     if (!replaceTarget) return;
     try {
         const resp = await apiPost(`/api/apps/${encodeURIComponent(replaceTarget.appname)}/icon/restore`);
@@ -729,6 +733,7 @@ async function useDefaultIcon() {
 }
 
 async function restoreIcon(appname) {
+    toast("图标修改功能维护中，暂时禁用", "error"); return; // v2.18.9 硬禁用
     if (!confirm(`确定还原 ${appname} 的图标？`)) return;
     try {
         const resp = await apiPost(`/api/apps/${encodeURIComponent(appname)}/icon/restore`);
@@ -740,6 +745,7 @@ async function restoreIcon(appname) {
 
 // ── Batch ──
 async function openBatchReplace() {
+    toast("图标修改功能维护中，暂时禁用", "error"); return; // v2.18.9 硬禁用
     batchMode = "replace";
     batchSelectedFile = null;
     document.getElementById("batchModalTitle").textContent = "批量替换图标";
@@ -751,6 +757,7 @@ async function openBatchReplace() {
 }
 
 async function openBatchRestore() {
+    toast("图标修改功能维护中，暂时禁用", "error"); return; // v2.18.9 硬禁用
     batchMode = "restore";
     batchSelectedFile = null;
     document.getElementById("batchModalTitle").textContent = "批量还原图标";
@@ -786,6 +793,7 @@ function onBatchFileSelected(input) {
 }
 
 async function confirmBatch() {
+    toast("图标修改功能维护中，暂时禁用", "error"); return; // v2.18.9 硬禁用
     const selected = Array.from(document.querySelectorAll(".batch-cb:checked")).map(cb => cb.value);
     if (!selected.length) { toast("请先选择应用", "error"); return; }
     const btn = document.getElementById("confirmBatchBtn");
