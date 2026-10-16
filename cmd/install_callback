@@ -1,18 +1,28 @@
 #!/bin/bash
-# 安装后初始化
+# 安装后初始化：写入初始配置（服务端口 + API Key）
+# v2.19.0: 新增服务端口配置，写入 VAR_DIR(TRIM_PKGVAR)/config.json，与 server.py 的 CONFIG_FILE 一致
 mkdir -p "${TRIM_PKGVAR}/backup"
 mkdir -p "${TRIM_PKGVAR}"
 chmod 700 "${TRIM_PKGVAR}"
 
-# 如果 wizard 提供了 API Key，写入初始配置
-if [ -n "${wizard_api_key}" ]; then
-    cat > "${TRIM_PKGVAR}/config.json" <<EOCFG
+API_KEY="${wizard_api_key:-}"
+SERVICE_PORT="${wizard_service_port:-18080}"
+
+# 校验端口合法性（安装向导已校验，此处兜底）
+case "$SERVICE_PORT" in
+  ''|*[!0-9]*) SERVICE_PORT=18080 ;;
+esac
+if [ "$SERVICE_PORT" -lt 1 ] 2>/dev/null || [ "$SERVICE_PORT" -gt 65535 ] 2>/dev/null; then
+  SERVICE_PORT=18080
+fi
+
+cat > "${TRIM_PKGVAR}/config.json" <<EOCFG
 {
-  "api_key": "${wizard_api_key}",
+  "api_key": "${API_KEY}",
+  "service_port": ${SERVICE_PORT},
   "max_upload_mb": 2,
   "icon_sizes": [64, 256]
 }
 EOCFG
-    chmod 600 "${TRIM_PKGVAR}/config.json"
-fi
+chmod 600 "${TRIM_PKGVAR}/config.json"
 exit 0

@@ -1071,7 +1071,7 @@ def client_status():
     minutes, seconds = divmod(remainder, 60)
     uptime_str = f"{hours}h {minutes}m {seconds}s" if hours else f"{minutes}m {seconds}s"
 
-    port = int(os.environ.get("TRIM_SERVICE_PORT", 18080))
+    port = _get_service_port()
 
     # 检测 CORS 配置状态
     cors_enabled = True  # CORS(app) 已在初始化时启用
@@ -1761,11 +1761,11 @@ def client_apps():
         _port_part = f":{port}" if port else ""
         # v2.18.4: icon_base uses client-reachable host (X-Forwarded-Host aware)
         if nas_host:
-            icon_base = f"http://{nas_host}:18080"
+            icon_base = f"http://{nas_host}:{_get_service_port()}"
         else:
             try:
                 _phost = _public_host_for_redirect(None, request)
-                icon_base = f"http://{_phost}" if ":" in _phost.split("]")[-1] else f"http://{_phost}:18080"
+                icon_base = f"http://{_phost}" if ":" in _phost.split("]")[-1] else f"http://{_phost}:{_get_service_port()}"
             except Exception:
                 icon_base = base_url
         # v2.18.2: 系统应用（port/path 为空）若探测到 NAS webui，直接返回 appview URL，
@@ -1858,6 +1858,19 @@ def _save_config(data):
         return False
 
 
+def _get_service_port():
+    """获取服务监听端口：优先 config.json 的 service_port，其次 TRIM_SERVICE_PORT 环境变量，最后 18080"""
+    try:
+        _p = _load_config().get("service_port")
+        if _p is not None:
+            _n = int(_p)
+            if 1 <= _n <= 65535:
+                return _n
+    except Exception:
+        pass
+    return int(os.environ.get("TRIM_SERVICE_PORT", 18080))
+
+
 @app.route("/api/config", methods=["GET"])
 @app.route("/app/com.fntb.iconmgr/api/config", methods=["GET"])
 def get_config():
@@ -1914,7 +1927,7 @@ class GunicornApp(BaseApplication):
 
 
 def run_server():
-    port = int(os.environ.get("TRIM_SERVICE_PORT", 18080))
+    port = _get_service_port()
     options = {
         "bind": f"0.0.0.0:{port}",
         "workers": 2,

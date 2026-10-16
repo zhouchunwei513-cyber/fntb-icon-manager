@@ -1,27 +1,59 @@
 #!/bin/bash
-# 配置后：重启服务使新配置生效
-PID_FILE="${TRIM_PKGVAR}/app.pid"
-if [ -f "$PID_FILE" ]; then
-  PID=$(cat "$PID_FILE" 2>/dev/null)
-  if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
-    kill "$PID" 2>/dev/null
-    sleep 1
+# 配置后：更新服务端口等配置并重启服务
+# v2.19.0: 写入 VAR_DIR(TRIM_PKGVAR)/config.json（与 server.py 的 CONFIG_FILE 一致），改用 main stop/start 重启
+
+CONFIG_FILE="${TRIM_PKGVAR}/config.json"
+SERVICE_PORT="${wizard_service_port:-}"
+API_KEY="${wizard_api_key:-}"
+
+# 优先使用应用自带的 venv Python，否则用系统 python3
+PYBIN="${TRIM_PKGVAR}/venv/bin/python"
+if [ ! -x "$PYBIN" ]; then
+  if command -v python3 >/dev/null 2>&1; then PYBIN="python3"; else PYBIN=""; fi
+fi
+
+if [ -n "$PYBIN" ]; then
+  "$PYBIN" - "$CONFIG_FILE" "$SERVICE_PORT" "$API_KEY" << 'PYEOF'
+import json, sys, os
+cfg_file, service_port, api_key = sys.argv[1], sys.argv[2], sys.argv[3]
+cfg = {}
+if os.path.isfile(cfg_file):
+    try:
+        cfg = json.load(open(cfg_file, encoding="utf-8"))
+    except Exception:
+        cfg = {}
+if service_port:
+    try:
+        p = int(service_port)
+        if 1 <= p <= 65535:
+            cfg["service_port"] = p
+    except ValueError:
+        pass
+if api_key:
+    cfg["api_key"] = api_key
+_d = os.path.dirname(cfg_file)
+if _d:
+    os.makedirs(_d, exist_ok=True)
+json.dump(cfg, open(cfg_file, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+PYEOF
+else
+  # 兜底：无 Python 时，有端口值则写最小配置
+  if [ -n "$SERVICE_PORT" ]; then
+    mkdir -p "$(dirname "$CONFIG_FILE")" 2>/dev/null
+    echo "{\"service_port\": ${SERVICE_PORT}}" > "$CONFIG_FILE"
   fi
 fi
 
-API_KEY="${wizard_api_key:-}"
-SERVICE_PORT="${wizard_service_port:-18080}"
+# 停止旧服务（含兜底清理残留进程，避免旧端口残留）
+if [ -x "/var/apps/${TRIM_APPNAME}/cmd/main" ]; then
+  "/var/apps/${TRIM_APPNAME}/cmd/main" stop >/dev/null 2>&1
+fi
+pkill -f "${TRIM_APPDEST}/server.py" 2>/dev/null
+sleep 1
 
-cat > "${TRIM_PKGETC}/config.json" << EOF
-{
-  "api_key": "$API_KEY",
-  "service_port": $SERVICE_PORT
-}
-EOF
-
-# 启动新服务
-cd "${TRIM_APPDEST}"
-nohup gunicorn -w 1 -b "0.0.0.0:${SERVICE_PORT}" --timeout 30 --max-requests 1000 server:app > "${TRIM_PKGVAR}/app.log" 2>&1 &
-echo $! > "$PID_FILE"
+# 启动新服务（走 main，确保 venv/gunicorn 正确、读取新端口）
+if [ -x "/var/apps/${TRIM_APPNAME}/cmd/main" ]; then
+  "/var/apps/${TRIM_APPNAME}/cmd/main" start >/dev/null 2>&1
+fi
 
 exit 0

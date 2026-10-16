@@ -1,0 +1,22 @@
+[
+    {
+        "stepTitle": "服务端口",
+        "items": [
+            {
+                "type": "tips",
+                "helpText": "修改服务端口后应用会自动重启。修改后请通过直连地址 http://NAS_IP:新端口/ 访问；应用中心的反代入口与桌面图标仍指向原端口 18080，如需一并调整需重新安装应用。"
+            },
+            {
+                "type": "text",
+                "field": "wizard_service_port",
+                "label": "服务端口",
+                "initValue": "18080",
+                "description": "图标管理器监听端口（1-65535）",
+                "rules": [
+                    { "required": true, "message": "请输入服务端口" },
+                    { "pattern": "^[0-9]+$", "message": "端口必须是数字" }
+                ]
+            }
+        ]
+    }
+]
