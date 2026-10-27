@@ -1,5 +1,5 @@
 appname=com.fntb.iconmgr
-version=2.20.0
+version=2.20.1
 display_name=FNTB图标管理器
 desc=飞牛应用图标批量管理工具，支持查看所有应用图标、自定义替换、还原默认图标，提供统一图标API供客户端调用
 platform=all
@@ -13,4 +13,4 @@ desktop_uidir=ui
 desktop_applaunchname=com.fntb.iconmgr.Application
 ctl_stop=true
 install_type=
-changelog=v2.20.0 应用列表改读飞牛主页面桌面接口，图标与顺序与主页面完全一致
+changelog=v2.20.1 修复 fndesk 生成的 Docker 应用快捷方式端口丢失、名称与主页面一致、补文件管理与下载

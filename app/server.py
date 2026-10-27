@@ -57,7 +57,7 @@ APP_DIR = os.environ.get("TRIM_APPDEST", os.path.dirname(os.path.abspath(__file_
 def _load_self_version():
     # v2.17.0: fnOS ��������Ӧ��װ�� /vol3/@appcenter/xxx��manifest ���ᷭ�Ƶ� /var/apps��
     # ���ز��ԣ�1) VAR_DIR/version �ļ� 2) ���� FNTB_VERSION 3) manifest ����λ�� 4) BUILTIN_VERSION
-    BUILTIN_VERSION = "2.20.0"
+    BUILTIN_VERSION = "2.20.1"
     # v2.18.6: VAR_DIR/version 是历史遗留文件（曾残留 2.18.0 误导面板版本显示），
     # 优先级降到 manifest 之后；安装包 manifest 为真实版本来源。
     _candidates = []
@@ -126,6 +126,8 @@ SYSTEM_APPS = {
     "trim.docker": "Docker",
     "trim.backup-and-sync": "备份",
     "trim.log-center": "日志中心",
+    "trim.file-manager": "文件管理",
+    "trim.download-center": "下载",
     "trim.file-manager.trash": "回收站",
     "trim.resource-manager": "资源管理",
     # 兼容旧目录名变体（trim-base 等）
@@ -333,6 +335,24 @@ def _public_host_for_redirect(nas_host, request):
     if rh:
         return str(rh).split("/")[0].split("?")[0]
     return "127.0.0.1"
+
+
+def _strip_port_from_host(host):
+    """去掉 host 末尾的 :port，保留主机名/IP（含 IPv6 [::1]）。用于 client_apps 构造 URL 避免双重端口。"""
+    h = str(host or "").strip().rstrip("/")
+    if not h:
+        return ""
+    if "://" in h:
+        h = h.split("://", 1)[-1]
+    h = h.split("/")[0].split("?")[0]
+    if h.startswith("["):
+        idx = h.find("]")
+        if idx != -1:
+            return h[:idx + 1]
+    if ":" in h:
+        h = h.split(":", 1)[0]
+    return h
+
 
 RUNTIME_APP_BLACKLIST = {
     "bunjs", "nodejs_v22", "nodejs_v24", "python312", "python311", "python310",
@@ -1052,6 +1072,7 @@ def _apps_from_desktop(entries):
         app_dir, manifest, root_dir = idx.get(appname, ("", {}, ""))
         title = str(e.get("title") or "").strip() or str(it.get("name") or "").strip() or appname
         full_url = str(e.get("fullURL") or "").strip()
+        e_url = e.get("url") or {}
         protocol, port, path = "http", "", "/"
         if full_url:
             try:
@@ -1061,6 +1082,12 @@ def _apps_from_desktop(entries):
                 path = pu.path or "/"
             except Exception:
                 pass
+        elif isinstance(e_url, dict) and e_url:
+            # v2.20.1: fullURL 为空时读取 entry.url（getUserDesktop 启动信息真源），
+            # 否则 fndesk 等生成的 docker 应用（url 类型 + 自定义 port）会丢端口导致快捷方式打不开
+            protocol = str(e_url.get("protocol") or "http")
+            port = str(e_url.get("port") or "")
+            path = str(e_url.get("path") or "/")
         is_builtin = (str(it.get("source") or "") == "built-in"
                       or str(e.get("sourceName") or "") == "built-in")
         # 飞牛桌面项的 fullURL 通常为空；客户端点击行为依赖 protocol/port/path，
@@ -2070,29 +2097,30 @@ def client_apps():
                 try:
                     from urllib.parse import urlparse as _u0
                     _wpu = _u0(webui_base)
-                    _phost = _public_host_for_redirect(nas_host, request)
-                    if ":" in _phost.split("]")[-1]:
-                        _sys_base = f"{_wpu.scheme or 'http'}://{_phost}"
-                    else:
-                        _sys_base = f"{_wpu.scheme or 'http'}://{_phost}:{_wpu.port or 5666}"
+                    _phost = _strip_port_from_host(_public_host_for_redirect(nas_host, request))
+                    _sys_base = f"{_wpu.scheme or 'http'}://{_phost}:{_wpu.port or 5666}"
                 except Exception:
-                    _phost = _public_host_for_redirect(nas_host, request)
-                    _sys_base = f"http://{_phost.split(':')[0]}:5666"
+                    _phost = _strip_port_from_host(_public_host_for_redirect(nas_host, request))
+                    _sys_base = f"http://{_phost}:5666"
                 url = f"{_sys_base}/appview?anchor={urllib.parse.quote(a['name'])}"
                 logger.info(
                     "client_apps system URL -> %s (webui_base=%s pub_host=%s)",
                     url, webui_base, _phost)
             else:
-                _phost2 = _public_host_for_redirect(nas_host, request)
+                _phost2 = _strip_port_from_host(_public_host_for_redirect(nas_host, request))
                 url = f"{protocol}://{_phost2}{_port_part}{path}"
                 logger.warning(
                     "client_apps system %s no webui_base, fallback %s", a["name"], url)
         elif nas_host:
-            url = f"{protocol}://{nas_host}{_port_part}{path}"
+            url = f"{protocol}://{_strip_port_from_host(nas_host)}{_port_part}{path}"
         else:
-            _phost2 = _public_host_for_redirect(nas_host, request)
+            _phost2 = _strip_port_from_host(_public_host_for_redirect(nas_host, request))
             url = f"{protocol}://{_phost2}{_port_part}{path}"
 
+        # v2.20.1: 完整记录每个应用的启动信息，便于排查快捷方式"打不开/不存在"链路
+        if not is_system and not port and not a.get("desktop_entry"):
+            logger.warning("client_apps 非系统应用缺少端口: name=%s proto=%s path=%r -> 快捷方式可能无法直连",
+                           a["name"], protocol, path)
         # v2.18.6: 图标 URL 带 ?v=mtime 版本参数（缓存失效）
         _v = _icon_version(a["name"])
         result.append({
@@ -2117,7 +2145,8 @@ def client_apps():
         "client_apps 返回 %d 个应用: %s",
         len(result),
         json.dumps(
-            [{"name": r["name"], "custom": r["has_custom_icon"], "system": r["system"], "url": r["url"]}
+            [{"name": r["name"], "proto": r["protocol"], "port": r["port"], "path": r["path"],
+              "system": r["system"], "url": r["url"]}
              for r in result], ensure_ascii=False)[:1500])
     # v2.18.6: no-cache——此前 5 分钟缓存导致客户端主页注入的自定义图标列表滞后
     # （"修改图标后主页不更新"的根因之一）
