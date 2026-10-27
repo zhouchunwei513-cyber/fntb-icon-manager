@@ -43,6 +43,9 @@ from flask import Flask, request, jsonify, send_file, render_template, redirect
 from flask_cors import CORS
 from PIL import Image, ImageDraw, ImageFont
 import urllib.parse
+import urllib.error
+import urllib.request
+import uuid
 from gunicorn.app.base import BaseApplication
 
 # ── 配置 ──────────────────────────────────────────────
@@ -54,7 +57,7 @@ APP_DIR = os.environ.get("TRIM_APPDEST", os.path.dirname(os.path.abspath(__file_
 def _load_self_version():
     # v2.17.0: fnOS ��������Ӧ��װ�� /vol3/@appcenter/xxx��manifest ���ᷭ�Ƶ� /var/apps��
     # ���ز��ԣ�1) VAR_DIR/version �ļ� 2) ���� FNTB_VERSION 3) manifest ����λ�� 4) BUILTIN_VERSION
-    BUILTIN_VERSION = "2.18.9"
+    BUILTIN_VERSION = "2.20.0"
     # v2.18.6: VAR_DIR/version 是历史遗留文件（曾残留 2.18.0 误导面板版本显示），
     # 优先级降到 manifest 之后；安装包 manifest 为真实版本来源。
     _candidates = []
@@ -846,8 +849,298 @@ def _sanitize_custom_icons_dir():
 _sanitize_custom_icons_dir()
 
 
+# ── 飞牛主页面桌面应用接口────────────────────────────
+# 旧实现只扫 /var/apps、/usr/local/apps/@appcenter、/vol*/@appcenter 三个目录再硬编码
+# SYSTEM_APPS 兜底，结果与飞牛主页面不一致：多出运行时/依赖类应用，缺少 built-in
+# 系统应用，顺序按显示名而非桌面顺序。飞牛主页面的权威数据来自 WebSocket-CGI
+# appcgi.sac.entry.v1.getUserDesktop，它同时通过 HTTP 网关暴露（已实测）：
+#   POST {base}/ogh/ac/w      Authorization: Bearer <oauth access_token>
+#   {"data":{"language":"zh-CN"},"req":"appcgi.sac.entry.v1.getUserDesktop","reqid":"<hex>"}
+# 响应为 JSON 数组，[0].data.list 每项：
+#   {"entry":{"appName","title","icon","fullURL","openType","display":{"show"}},
+#    "itemType":"entry","sort":10,"source":"built-in"}
+# access_token 有效期 1 小时，用 /oauthapi/refresh + refresh_token 续期（不轮换）。
+# 凭据存放 VAR_DIR/nas_oauth.json；接口不可用时自动回退本地目录扫描（旧逻辑）。
+NAS_OAUTH_FILE = os.path.join(VAR_DIR, "nas_oauth.json")
+NAS_API_PORTS = (5666, 10300)
+_OAUTH_CLIENT_ID = "YJNMPJUGA9"
+
+
+def _load_nas_oauth():
+    """读取 NAS OAuth 凭据（access_token / refresh_token）"""
+    try:
+        if os.path.isfile(NAS_OAUTH_FILE):
+            with open(NAS_OAUTH_FILE, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if isinstance(d, dict):
+                return d
+    except Exception as e:
+        logger.warning(f"读取 nas_oauth.json 失败: {e}")
+    return {}
+
+
+def _save_nas_oauth(d):
+    try:
+        with open(NAS_OAUTH_FILE, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.warning(f"写入 nas_oauth.json 失败: {e}")
+
+
+def _nas_api_bases():
+    """候选 NAS webui API 地址（本机回环优先）"""
+    bases = []
+    for port in NAS_API_PORTS:
+        for host in ("127.0.0.1", "localhost"):
+            b = "http://%s:%d" % (host, port)
+            if b not in bases:
+                bases.append(b)
+    try:
+        wb = _get_nas_webui_base()
+        if wb:
+            wb = wb.rstrip("/")
+            if wb not in bases:
+                bases.append(wb)
+    except Exception:
+        pass
+    return bases
+
+
+def _nas_token(force_refresh=False):
+    """取可用的 access_token，必要时用 refresh_token 续期"""
+    d = _load_nas_oauth()
+    at = str(d.get("access_token") or "")
+    try:
+        exp = int(d.get("expires_at") or 0)
+    except Exception:
+        exp = 0
+    now_ms = int(time.time() * 1000)
+    if at and not force_refresh and (exp == 0 or exp - now_ms > 120000):
+        return at, d
+    rt = str(d.get("refresh_token") or "")
+    if not rt:
+        logger.warning("nas oauth 无 refresh_token，无法续期")
+        return at, d
+    body = json.dumps({
+        "client_id": str(d.get("client_id") or _OAUTH_CLIENT_ID),
+        "refresh_token": rt,
+        "device_id": str(d.get("device_id") or ""),
+    }).encode("utf-8")
+    for base in _nas_api_bases()[:2]:
+        try:
+            req = urllib.request.Request(base + "/oauthapi/refresh", data=body, method="POST",
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                j = json.loads(resp.read().decode("utf-8", "replace"))
+            data = (j or {}).get("data") or {}
+            if data.get("access_token"):
+                d["access_token"] = data["access_token"]
+                try:
+                    d["expires_at"] = int(data.get("expires_at") or 0)
+                except Exception:
+                    d["expires_at"] = 0
+                if data.get("refresh_token"):
+                    d["refresh_token"] = data["refresh_token"]
+                d["updated_at"] = int(time.time())
+                _save_nas_oauth(d)
+                logger.info("nas oauth access_token 已刷新")
+                return d["access_token"], d
+        except Exception as e:
+            logger.warning(f"nas oauth refresh 失败 @{base}: {e}")
+    return at, d
+
+
+def _nas_cgi(req_name, data=None, timeout=12):
+    """调用飞牛 HTTP-CGI 网关 /ogh/ac/w，返回响应里的 data 段（失败返回 None）"""
+    payload_data = {"language": "zh-CN"}
+    if isinstance(data, dict):
+        payload_data.update(data)
+    bases = _nas_api_bases()
+    for attempt in (0, 1):
+        tok, _d = _nas_token(force_refresh=(attempt == 1))
+        if not tok:
+            logger.warning("nas cgi 跳过：无可用 oauth token")
+            return None
+        body = json.dumps({"data": payload_data, "req": req_name,
+                           "reqid": uuid.uuid4().hex[:16]}).encode("utf-8")
+        unauth = False
+        for base in bases:
+            try:
+                req = urllib.request.Request(
+                    base + "/ogh/ac/w", data=body, method="POST",
+                    headers={"Authorization": "Bearer " + tok,
+                             "Content-Type": "application/json",
+                             "Accept": "*/*"})
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    raw = resp.read().decode("utf-8", "replace")
+            except urllib.error.HTTPError as e:
+                if e.code == 401:
+                    unauth = True
+                    break
+                logger.warning(f"nas cgi {req_name} HTTP {e.code} @{base}")
+                continue
+            except Exception as e:
+                logger.warning(f"nas cgi {req_name} 连接失败 @{base}: {e}")
+                continue
+            try:
+                j = json.loads(raw)
+            except Exception:
+                logger.warning(f"nas cgi {req_name} 响应非 JSON: {raw[:120]}")
+                continue
+            item = j[0] if isinstance(j, list) and j else j
+            if isinstance(item, dict):
+                if item.get("code") in (0, None) and isinstance(item.get("data"), dict):
+                    return item["data"]
+                logger.warning(f"nas cgi {req_name} code={item.get('code')} msg={item.get('msg')!r}")
+                return None
+        if unauth:
+            continue
+        return None
+    return None
+
+
+def _fetch_desktop_entries():
+    """取飞牛主页面（当前用户桌面）的应用列表；不可用返回 None"""
+    data = _nas_cgi("appcgi.sac.entry.v1.getUserDesktop")
+    if not isinstance(data, dict):
+        return None
+    lst = data.get("list")
+    if not isinstance(lst, list):
+        return None
+    return lst
+
+
+def _local_app_dir_index():
+    """建立 appname -> (安装目录, manifest, 根目录) 索引，用于补充版本/图标"""
+    idx = {}
+    for root_dir in FNOS_APPS_ROOTS:
+        if not os.path.isdir(root_dir):
+            continue
+        try:
+            names = os.listdir(root_dir)
+        except PermissionError:
+            continue
+        for name in names:
+            app_dir = os.path.join(root_dir, name)
+            if not os.path.isdir(app_dir):
+                continue
+            m = read_manifest(app_dir)
+            an = str(m.get("appname") or "").strip() or name
+            idx.setdefault(an, (app_dir, m, root_dir))
+            idx.setdefault(name, (app_dir, m, root_dir))
+    return idx
+
+
+def _apps_from_desktop(entries):
+    """把 getUserDesktop 的桌面项转换成应用记录（顺序即桌面顺序）"""
+    idx = _local_app_dir_index()
+    apps = []
+    seen = set()
+    for it in entries:
+        if not isinstance(it, dict):
+            continue
+        if it.get("itemType") and it.get("itemType") != "entry":
+            continue
+        e = it.get("entry") or {}
+        appname = str(e.get("appName") or "").strip()
+        if not appname or appname in seen:
+            continue
+        disp = e.get("display") or {}
+        if disp.get("show") is False:
+            continue
+        seen.add(appname)
+        app_dir, manifest, root_dir = idx.get(appname, ("", {}, ""))
+        title = str(e.get("title") or "").strip() or str(it.get("name") or "").strip() or appname
+        full_url = str(e.get("fullURL") or "").strip()
+        protocol, port, path = "http", "", "/"
+        if full_url:
+            try:
+                pu = urllib.parse.urlparse(full_url)
+                protocol = pu.scheme or "http"
+                port = str(pu.port or "")
+                path = pu.path or "/"
+            except Exception:
+                pass
+        is_builtin = (str(it.get("source") or "") == "built-in"
+                      or str(e.get("sourceName") or "") == "built-in")
+        # 飞牛桌面项的 fullURL 通常为空；客户端点击行为依赖 protocol/port/path，
+        # 因此有安装目录时仍读取应用自身 ui 配置补齐启动信息（与本地扫描一致）
+        launch_info = {}
+        try:
+            if app_dir:
+                ui_cfg = read_ui_config(app_dir)
+                _aln = str(manifest.get("desktop_applaunchname", "") or "")
+                if _aln and ui_cfg:
+                    _le = (ui_cfg.get(".url") or {}).get(_aln) or {}
+                    if _le:
+                        launch_info = {
+                            "title": _le.get("title", ""),
+                            "protocol": _le.get("protocol", ""),
+                            "port": _le.get("port", ""),
+                            "url": _le.get("url", ""),
+                            "type": _le.get("type", ""),
+                        }
+        except Exception as _e:
+            logger.warning(f"读取 ui 配置失败 {appname}: {_e}")
+        if launch_info:
+            protocol = launch_info.get("protocol") or protocol
+            port = str(launch_info.get("port") or port or "")
+            path = launch_info.get("url") or path
+        # 是否系统应用：优先 manifest 声明，缺失时用桌面 built-in 标记
+        man_source = str(manifest.get("source", "") or "")
+        man_inst = str(manifest.get("install_type", "") or "")
+        if app_dir:
+            icon64 = _is_valid_icon_file(get_app_icon_path(app_dir, 64))
+            icon256 = _is_valid_icon_file(get_app_icon_path(app_dir, 256))
+        else:
+            icon64 = icon256 = _system_webui_icon_ok(appname)
+        apps.append({
+            "name": appname,
+            "display_name": title,
+            "version": str(manifest.get("version", "") or ""),
+            "desc": str(manifest.get("desc", "") or ""),
+            "source": man_source or ("system" if is_builtin else "appcenter"),
+            "platform": str(manifest.get("platform", "") or ""),
+            "install_type": man_inst or ("system" if is_builtin else "normal"),
+            "has_default_icon_64": icon64,
+            "has_default_icon_256": icon256,
+            "has_custom_icon": has_custom_icon(appname),
+            "app_dir": app_dir,
+            "root_dir": root_dir,
+            "title": title,
+            "protocol": protocol,
+            "port": port,
+            "path": path,
+            "applaunchname": str(manifest.get("desktop_applaunchname", "") or ""),
+            "launch_type": str(launch_info.get("type") or e.get("openType") or ""),
+            "desktop_sort": int(it.get("sort") or 0),
+            "webui_icon": str(e.get("icon") or ""),
+            "desktop_entry": True,
+        })
+    apps.sort(key=lambda x: (x.get("desktop_sort") or 0))
+    return apps
+
+
 def scan_all_apps():
-    """扫描所有已安装的 fnOS 应用"""
+    """扫描应用列表（以飞牛主页面桌面布局为准，接口不可用时回退本地扫描）"""
+    try:
+        entries = _fetch_desktop_entries()
+        if entries:
+            apps = _apps_from_desktop(entries)
+            if apps:
+                logger.info("scan_all_apps 桌面接口: 应用数=%d 顺序=%s",
+                            len(apps), [a["name"] for a in apps])
+                return apps
+            logger.warning("scan_all_apps 桌面接口返回空列表，回退本地扫描")
+        else:
+            logger.warning("scan_all_apps 桌面接口不可用，回退本地扫描")
+    except Exception as e:
+        logger.warning(f"scan_all_apps 桌面接口异常，回退本地扫描: {e}")
+    return _scan_all_apps_local()
+
+
+def _scan_all_apps_local():
+    """扫描所有已安装的 fnOS 应用（本地目录兜底）"""
     apps = []
     seen_names = set()
 
@@ -1161,7 +1454,7 @@ def list_apps():
     result = []
     for a in apps:
         # v2.17.0: ���˱���/����Ӧ�ã���������ҳ����װӦ���б�һ��
-        if _is_runtime_app(a.get("name", "")):
+        if not a.get("desktop_entry") and _is_runtime_app(a.get("name", "")):
             continue
         # 状态筛选
         if status_filter == "custom" and not has_custom_icon(a["name"]):
@@ -1744,7 +2037,7 @@ def client_apps():
     result = []
     for a in apps:
         # v2.17.0: filter runtime/dependency apps, keep consistent with client home list
-        if _is_runtime_app(a.get("name", "")):
+        if not a.get("desktop_entry") and _is_runtime_app(a.get("name", "")):
             logger.info(f"client_apps filtered runtime app: {a.get('name', '')}")
             continue
         # v2.18.0: status 过滤
