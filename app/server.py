@@ -1299,8 +1299,14 @@ def _scan_all_apps_local():
 
 def refresh_cache():
     """刷新应用缓存"""
-    global _apps_cache
+    global _apps_cache, _apps_cache_at, _apps_fp
     _apps_cache = scan_all_apps()
+    # v3.0.25（需求 1）：手动刷新后同步缓存时间与指纹，避免紧接着的请求再重扫一遍
+    _apps_cache_at = time.time()
+    try:
+        _apps_fp = _apps_dirs_fingerprint()
+    except Exception:
+        pass
     # 写入缓存文件
     try:
         cache_data = []
@@ -1323,19 +1329,56 @@ def refresh_cache():
 # 全局缓存
 _apps_cache = None
 
+# v3.0.25（需求 1）：应用列表自动感知
+#   此前 _apps_cache 首次扫描后永不过期，安装/卸载应用后必须手动点"刷新"、
+#   甚至刷好几次才正确；现在加 20s TTL + 目录指纹，列表变化自动重扫，
+#   并把增删明细写日志（新增/移除），前端轮询 /api/apps/version 即可感知。
+_APPS_CACHE_TTL = 20.0
+_apps_cache_at = 0.0
+_apps_fp = ""
 
-def get_apps_cache():
-    global _apps_cache
-    if _apps_cache is None:
-        # 尝试从缓存文件加载
-        if os.path.isfile(APPS_CACHE_FILE):
-            try:
-                with open(APPS_CACHE_FILE, "r", encoding="utf-8") as f:
-                    cached = json.load(f)
-                # 缓存只存基本信息，需要重新扫描获取完整信息
-            except Exception:
-                pass
-        _apps_cache = scan_all_apps()
+
+def _apps_dirs_fingerprint():
+    """轻量指纹：各应用根目录的 mtime + 子目录名集合（纯本地，不打网络）"""
+    parts = []
+    for root_dir in FNOS_APPS_ROOTS:
+        try:
+            names = sorted(os.listdir(root_dir))
+            mt = int(os.path.getmtime(root_dir))
+            parts.append("%s|%d|%s" % (root_dir, mt, ",".join(names)))
+        except Exception:
+            parts.append("%s|-1|" % root_dir)
+    return hashlib.md5("|".join(parts).encode("utf-8", "ignore")).hexdigest()
+
+
+def get_apps_cache(force=False):
+    """获取应用列表缓存（v3.0.25：TTL 20s + 目录指纹，自动感知应用增删）"""
+    global _apps_cache, _apps_cache_at, _apps_fp
+    now = time.time()
+    if _apps_cache is not None and not force and (now - _apps_cache_at) < _APPS_CACHE_TTL:
+        return _apps_cache
+    try:
+        fp = _apps_dirs_fingerprint()
+    except Exception:
+        fp = ""
+    if _apps_cache is not None and not force and fp and fp == _apps_fp:
+        # 目录结构未变：仅续期，不做完整重扫（避免每次请求都跑扫描）
+        _apps_cache_at = now
+        return _apps_cache
+    old_names = [a.get("name") for a in (_apps_cache or [])]
+    fresh = scan_all_apps()
+    _apps_cache = fresh
+    _apps_cache_at = now
+    _apps_fp = fp
+    try:
+        new_names = [a.get("name") for a in fresh]
+        if old_names and old_names != new_names:
+            added = [n for n in new_names if n not in old_names]
+            removed = [n for n in old_names if n not in new_names]
+            logger.info("应用列表自动感知: 新增=%s 移除=%s 总数=%d",
+                        added, removed, len(new_names))
+    except Exception:
+        pass
     return _apps_cache
 
 
@@ -1515,6 +1558,26 @@ def list_apps():
         })
 
     return jsonify({"total": len(result), "apps": result})
+
+
+@app.route("/api/apps/version")
+@app.route("/app/com.fntb.iconmgr/api/apps/version")
+def apps_version():
+    """v3.0.25（需求 1）：应用列表版本指纹
+
+    前端每 3s 轮询本接口，指纹（应用名集合 + 目录指纹）变化即自动重载列表与图标，
+    无需用户手动刷新。返回体极小，不触发浏览器缓存。
+    """
+    apps = get_apps_cache()
+    try:
+        names = [a.get("name") for a in apps]
+        ver = hashlib.md5((",".join(names) + "#" + str(_apps_fp)).encode("utf-8", "ignore")).hexdigest()[:16]
+        resp = jsonify({"ok": True, "version": ver, "total": len(apps),
+                        "at": int(_apps_cache_at or 0)})
+        return _add_cache_headers(resp, 0)
+    except Exception as e:
+        logger.warning("apps_version 失败: %s", e)
+        return jsonify({"ok": False, "version": "", "total": 0}), 500
 
 
 @app.route("/api/refresh")
@@ -2080,7 +2143,13 @@ def client_apps():
         # 构造完整 URL（系统应用 port 为空时不拼端口）
         _port_part = f":{port}" if port else ""
         # v2.18.4: icon_base uses client-reachable host (X-Forwarded-Host aware)
-        if nas_host:
+        # v3.0.25（需求 2）：图标基址优先用「客户端本次访问 fntb 的地址」（request.url_root）。
+        # 此前公网(FRP)访问时仍拼成 http://<host>:18080（服务内网端口），公网不可达，
+        # 客户端只能退回缓存图标 → 表现为图标不及时/不正确。
+        _req_root = (base_url or "").rstrip("/")
+        if _req_root.lower().startswith("http"):
+            icon_base = _req_root
+        elif nas_host:
             icon_base = f"http://{nas_host}:{_get_service_port()}"
         else:
             try:

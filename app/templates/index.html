@@ -661,6 +661,37 @@ function renderApps() {
 function escHtml(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 function escAttr(s) { return (s || '').replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
 
+// ── v3.0.25（需求 1）：应用列表自动感知与联动 ──
+//   以前：新增/卸载应用后必须手动点"刷新"，且常常要刷好几遍列表才正确；
+//   现在：每 3s 轮询 /api/apps/version（返回 16 字节指纹 + 应用数），
+//        指纹变化即静默重载列表与图标，用户无需任何手动操作。
+let __appsVer = "";
+let __appsPollTimer = null;
+async function pollAppsVersion() {
+    try {
+        if (document.hidden) return;
+        const data = await apiGet("/api/apps/version");
+        if (!data || !data.ok) return;
+        if (!__appsVer) { __appsVer = data.version; return; }
+        if (data.version !== __appsVer) {
+            const oldVer = __appsVer;
+            __appsVer = data.version;
+            await loadApps();
+            try { console.log("[v3.0.25] 应用列表自动更新", oldVer, "->", data.version, "total=", data.total); } catch (_) {}
+        }
+    } catch (_) {}
+}
+function startAppsWatcher() {
+    if (__appsPollTimer) return;
+    __appsVer = "";
+    pollAppsVersion();
+    __appsPollTimer = setInterval(pollAppsVersion, 3000);
+    try {
+        document.addEventListener("visibilitychange", function () { if (!document.hidden) pollAppsVersion(); });
+        window.addEventListener("focus", pollAppsVersion);
+    } catch (_) {}
+}
+
 // ── Search & Filter ──
 let searchTimer;
 function onSearch() { clearTimeout(searchTimer); searchTimer = setTimeout(loadApps, 300); }
@@ -975,6 +1006,8 @@ async function refreshStatus() {
 // ── Init ──
 loadApps();
 loadNasHost();
+// v3.0.25（需求 1）：启动应用列表自动感知轮询
+startAppsWatcher();
 </script>
 </body>
 </html>
