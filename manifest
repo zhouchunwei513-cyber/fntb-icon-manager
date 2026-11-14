@@ -1,5 +1,5 @@
 appname=com.fntb.iconmgr
-version=2.21.1
+version=2.21.2
 display_name=FNTB图标管理器
 desc=飞牛应用图标批量管理工具，支持查看所有应用图标、自定义替换、还原默认图标，提供统一图标API供客户端调用
 platform=all
@@ -13,4 +13,4 @@ desktop_uidir=ui
 desktop_applaunchname=com.fntb.iconmgr.Application
 ctl_stop=true
 install_type=
-changelog=v2.21.1 图标准确性与列表准确性修复：①系统应用图标改本机静态文件优先（/usr/trim/www/static/app/icons/<app>/icon.png，root 直读，与飞牛桌面字节一致），修掉 9 个内置模块应用图标变成 8893 字节登录页 HTML 的问题；②图标缓存与下载增加魔数校验，HTML 一律丢弃；③黑名单移除 xte/npc/trim.sync_server（被误杀的桌面可见应用）；④无 manifest 的壳目录与安装残留（app、fndesk_<时间戳>）不再进列表；⑤显示名与桌面对齐（日志/文件快照/素材库 Seek/影视在线扩展管理）；⑥/api/apps/version 的 total 与 /api/apps 同口径；⑦图标 MIME 按魔数返回（WebP 不再谎报 png） || v2.21.0 应用列表自动感知：缓存加20秒TTL与目录指纹（新增/卸载应用自动重扫，无需手动刷新，且不再需要刷好几次）；新增 /api/apps/version 版本指纹接口，页面每3秒轮询自动更新列表与图标；修复公网(FRP)访问时图标URL错误指向内网服务端口导致图标不更新
+changelog=v2.21.2 与飞牛桌面严格一致：①默认只显示飞牛桌面上的应用（/api/apps 返回 29 项），Office文档/文本编辑器/预览等入口全部 noDisplay 的应用不再出现；②新增「仅显示飞牛桌面上的应用」开关，取消勾选可看全部已安装应用（?all=1）；③新增 /api/desktop-filter 查看与调整桌面过滤（hidden/shown 持久化到 var/desktop_filter.json）；④修复 ui/config 在 /usr/local/apps/@appcenter 下找不到导致 noDisplay 与入口标题失效的问题；⑤显示名继续与桌面对齐（日志/文件快照/素材库 Seek/影视在线扩展管理） || v2.21.1 图标准确性与列表准确性修复：①系统应用图标改本机静态文件优先（/usr/trim/www/static/app/icons/<app>/icon.png，root 直读，与飞牛桌面字节一致），修掉 9 个内置模块应用图标变成 8893 字节登录页 HTML 的问题；②图标缓存与下载增加魔数校验，HTML 一律丢弃；③黑名单移除 xte/npc/trim.sync_server（被误杀的桌面可见应用）；④无 manifest 的壳目录与安装残留（app、fndesk_<时间戳>）不再进列表；⑤显示名与桌面对齐（日志/文件快照/素材库 Seek/影视在线扩展管理）；⑥/api/apps/version 的 total 与 /api/apps 同口径；⑦图标 MIME 按魔数返回（WebP 不再谎报 png） || v2.21.0 应用列表自动感知：缓存加20秒TTL与目录指纹（新增/卸载应用自动重扫，无需手动刷新，且不再需要刷好几次）；新增 /api/apps/version 版本指纹接口，页面每3秒轮询自动更新列表与图标；修复公网(FRP)访问时图标URL错误指向内网服务端口导致图标不更新

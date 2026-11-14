@@ -39,6 +39,10 @@
         .btn-danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 
         .stats { padding: 0 24px 8px; font-size: 13px; color: var(--text-dim); }
+        /* v2.21.2: 桌面应用视图开关 */
+        .desk-only { display:flex; align-items:center; gap:8px; padding:0 24px 10px;
+            font-size:13px; color:var(--text-dim); cursor:pointer; user-select:none; }
+        .desk-only input { width:15px; height:15px; accent-color:#3b82f6; cursor:pointer; }
 
         .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; padding: 16px 24px; }
 
@@ -124,6 +128,9 @@
     </div>
 
     <div class="stats" id="stats"></div>
+    <label class="desk-only" title="默认只显示飞牛桌面上的应用；取消勾选可看到全部已安装应用（含桌面不显示的扩展管理与文件类型应用）">
+        <input type="checkbox" id="deskOnlyChk" checked onchange="loadApps()"> 仅显示飞牛桌面上的应用
+    </label>
 
     <!-- App Grid -->
     <div class="grid" id="appGrid">
@@ -608,6 +615,10 @@ async function loadApps() {
     if (currentFilter) params.push(`status=${currentFilter}`);
     const q = document.getElementById("searchInput").value.trim();
     if (q) params.push(`q=${encodeURIComponent(q)}`);
+    // v2.21.2: 默认只列桌面应用；取消勾选走 ?all=1
+    const _deskOnly = document.getElementById("deskOnlyChk");
+    if (_deskOnly && !_deskOnly.checked) params.push("all=1");
+    else if (!_deskOnly) params.push("all=1");
     if (params.length) path += "?" + params.join("&");
 
     const data = await apiGet(path);

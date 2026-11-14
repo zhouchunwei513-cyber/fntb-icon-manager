@@ -63,7 +63,7 @@ APP_DIR = os.environ.get("TRIM_APPDEST", os.path.dirname(os.path.abspath(__file_
 def _load_self_version():
     # v2.17.0: fnOS ��������Ӧ��װ�� /vol3/@appcenter/xxx��manifest ���ᷭ�Ƶ� /var/apps��
     # ���ز��ԣ�1) VAR_DIR/version �ļ� 2) ���� FNTB_VERSION 3) manifest ����λ�� 4) BUILTIN_VERSION
-    BUILTIN_VERSION = "2.21.1"
+    BUILTIN_VERSION = "2.21.2"
     # v2.18.6: VAR_DIR/version 是历史遗留文件（曾残留 2.18.0 误导面板版本显示），
     # 优先级降到 manifest 之后；安装包 manifest 为真实版本来源。
     _candidates = []
@@ -131,7 +131,7 @@ SYSTEM_APPS = {
     "trim.app-center": "应用中心",
     "trim.docker": "Docker",
     "trim.backup-and-sync": "备份",
-    "trim.log-center": "日志中心",
+    "trim.log-center": "日志",
     "trim.file-manager": "文件管理",
     "trim.download-center": "下载",
     "trim.file-manager.trash": "回收站",
@@ -505,15 +505,26 @@ def _track_request():
 # ── 工具函数 ──────────────────────────────────────────
 
 def read_ui_config(app_dir):
-    """读取 app/ui/config 获取桌面入口配置"""
-    config_path = os.path.join(app_dir, "ui", "config")
-    if not os.path.isfile(config_path):
-        return {}
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+    """读取 app/ui/config 获取桌面入口配置
+
+    v2.21.2: /var/apps/<app>/ 下常常没有 ui/ 目录（系统模块应用的实际安装目录在
+    /usr/local/apps/@appcenter/<app>/，/var/apps 里只有 manifest 与软链），
+    因此按「app_dir 自身 → 各 @appcenter 根」的顺序找 ui/config。
+    """
+    base = os.path.basename(os.path.normpath(app_dir))
+    candidates = [os.path.join(app_dir, "ui", "config")]
+    for root in ("/usr/local/apps/@appcenter", "/vol3/@appcenter",
+                 "/vol2/@appcenter", "/vol4/@appcenter"):
+        candidates.append(os.path.join(root, base, "ui", "config"))
+    for config_path in candidates:
+        if not os.path.isfile(config_path):
+            continue
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            continue
+    return {}
 
 
 def get_app_title_from_ui_config(ui_config, applaunchname):
@@ -1257,6 +1268,67 @@ def _align_display_name(appname, name):
     return name
 
 
+# ── v2.21.2: 与飞牛桌面严格一致 ──────────────────────────────
+# 飞牛桌面上显示哪些应用，真值在「用户桌面条目」里，走 fnOS 的加密会话接口，
+# FPK 侧拿不到（HTTP 与 WebSocket 都需要前端那套 RSA/AES 协商）。因此这里用两条
+# 可解释的本地规则近似桌面：
+#   ①ui/config 里**所有入口**都标了 noDisplay:true 的应用不上桌面
+#     （Office文档 / 文本编辑器 / 预览 就是这种）；
+#   ②少数「扩展管理」类应用本地配置没有 noDisplay 标记、但桌面确实不显示，
+#     用 DESKTOP_HIDE_EXTRA 兜住（目前只有 fnMusic 音源扩展）。
+# 需要一次看全部应用用 /api/apps?all=1；临时调整用 /api/desktop-filter。
+DESKTOP_HIDE_EXTRA = {"fnmusic-ext"}
+DESKTOP_FILTER_FILE = os.path.join(VAR_DIR, "desktop_filter.json")
+
+
+def _load_desktop_filter():
+    """v2.21.2: 用户自定义的桌面显示过滤（hidden 强制隐藏 / shown 强制显示）。"""
+    data = {"hidden": [], "shown": []}
+    try:
+        if os.path.isfile(DESKTOP_FILTER_FILE):
+            with open(DESKTOP_FILTER_FILE, "r", encoding="utf-8") as f:
+                raw = json.load(f) or {}
+            for k in ("hidden", "shown"):
+                v = raw.get(k)
+                if isinstance(v, list):
+                    data[k] = [str(x) for x in v if isinstance(x, str)]
+    except Exception as e:
+        logger.warning(f"desktop_filter 读取失败: {e}")
+    return data
+
+
+def _save_desktop_filter(data):
+    try:
+        d = os.path.dirname(DESKTOP_FILTER_FILE)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        tmp = DESKTOP_FILTER_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, DESKTOP_FILTER_FILE)
+        return True
+    except Exception as e:
+        logger.warning(f"desktop_filter 写入失败: {e}")
+        return False
+
+
+def _desktop_hidden_set():
+    data = _load_desktop_filter()
+    hidden = set(DESKTOP_HIDE_EXTRA) | set(data["hidden"])
+    hidden -= set(data["shown"])
+    return hidden
+
+
+def is_desktop_app(app):
+    """v2.21.2: 该应用是否应该出现在「桌面应用」列表里。"""
+    name = app.get("name", "")
+    if not name:
+        return False
+    if app.get("ui_all_no_display"):
+        return False
+    return name not in _desktop_hidden_set()
+
+
 def _scan_all_apps_local():
     """扫描所有已安装的 fnOS 应用（本地目录兜底）"""
     apps = []
@@ -1301,8 +1373,15 @@ def _scan_all_apps_local():
             ui_config = read_ui_config(app_dir)
             launch_info = {}
             applaunchname = manifest.get("desktop_applaunchname", "")
-            if applaunchname and ui_config:
-                entry = ui_config.get(".url", {}).get(applaunchname, {})
+            # v2.21.2: 入口级 noDisplay 过滤——桌面不显示 noDisplay:true 的入口
+            _entries = (ui_config.get(".url") or {}) if isinstance(ui_config, dict) else {}
+            _vis_entries = {k: v for k, v in _entries.items()
+                            if isinstance(v, dict) and v.get("noDisplay") is not True}
+            _all_hidden = bool(_entries) and not _vis_entries
+            if _all_hidden:
+                logger.info(f"scan_all_apps 入口全部 noDisplay（桌面不显示）: {appname}")
+            if ui_config:
+                entry = _vis_entries.get(applaunchname) or (next(iter(_vis_entries.values())) if _vis_entries else {})
                 if entry:
                     launch_info = {
                         "title": entry.get("title", ""),
@@ -1344,6 +1423,7 @@ def _scan_all_apps_local():
                 "app_dir": app_dir,
                 "root_dir": root_dir,
                 # PC 客户端兼容字段
+                "ui_all_no_display": _all_hidden,
                 "title": launch_info.get("title", ""),
                 "protocol": launch_info.get("protocol", "http"),
                 "port": launch_info.get("port", ""),
@@ -1615,6 +1695,8 @@ def get_logs():
 def list_apps():
     """获取所有应用列表"""
     apps = get_apps_cache()
+    # v2.21.2: 默认只返回飞牛桌面上的应用；?all=1 返回全部（排障用）
+    include_all = request.args.get("all", "").strip().lower() in ("1", "true", "yes")
     status_filter = request.args.get("status", "")
     search_q = request.args.get("q", "").lower()
 
@@ -1622,6 +1704,9 @@ def list_apps():
     for a in apps:
         # v2.17.0: ���˱���/����Ӧ�ã���������ҳ����װӦ���б�һ��
         if not a.get("desktop_entry") and _is_runtime_app(a.get("name", "")):
+            continue
+        # v2.21.2: 只保留桌面可见应用
+        if not include_all and not is_desktop_app(a):
             continue
         # 状态筛选
         if status_filter == "custom" and not has_custom_icon(a["name"]):
@@ -1660,7 +1745,34 @@ def list_apps():
 def _visible_apps():
     """v2.21.1: 对外可见应用（与 list_apps 的过滤规则一致）。"""
     return [a for a in get_apps_cache()
-            if a.get("desktop_entry") or not _is_runtime_app(a.get("name", ""))]
+            if (a.get("desktop_entry") or not _is_runtime_app(a.get("name", "")))
+            and is_desktop_app(a)]
+
+
+@app.route("/api/desktop-filter", methods=["GET", "POST"])
+@app.route("/app/com.fntb.iconmgr/api/desktop-filter", methods=["GET", "POST"])
+def desktop_filter_api():
+    """v2.21.2: 查看/调整「桌面应用」过滤。
+
+    GET  -> {ok, hidden[], shown[], extra[], total}
+    POST -> {"hidden": [...], "shown": [...]} 覆盖式保存（列表内元素为应用名）
+    """
+    if request.method == "GET":
+        data = _load_desktop_filter()
+        return jsonify({
+            "ok": True,
+            "hidden": sorted(_desktop_hidden_set()),
+            "shown": data["shown"],
+            "extra": sorted(DESKTOP_HIDE_EXTRA),
+            "total": len(_visible_apps()),
+        })
+    payload = request.get_json(silent=True) or {}
+    data = _load_desktop_filter()
+    for k in ("hidden", "shown"):
+        if isinstance(payload.get(k), list):
+            data[k] = [str(x) for x in payload[k] if isinstance(x, str)]
+    ok = _save_desktop_filter(data)
+    return (jsonify({"ok": ok, "hidden": sorted(_desktop_hidden_set())}), 200 if ok else 500)
 
 
 @app.route("/api/apps/version")
