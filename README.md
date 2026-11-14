@@ -212,3 +212,23 @@ Content-Type: application/json
 ## License
 
 MIT
+
+## 更新记录
+
+### v2.21.1（2026-11-14）
+
+图标准确性与列表准确性修复，均针对「服务与飞牛桌面同机」的部署场景：
+
+- **系统应用图标改为本机静态文件优先**：直接读 `/usr/trim/www/static/app/icons/<app>/icon.png`（应用以 root 运行，与飞牛桌面渲染的图标字节完全一致），HTTP 下载降级为兜底。修掉 9 个桌面内置模块应用（Docker、下载、文件管理、回收站、备份、应用中心、日志、设置、资源监控）图标返回 8893 字节登录页 HTML 的问题。
+- **图标魔数校验**：新增 `_icon_head_ok()` / `_icon_magic_ok()`，PNG/JPEG/WebP/GIF/BMP/ICO/SVG 白名单；下载与缓存读取都校验，HTML 一律丢弃、不落盘。
+- **黑名单修正**：`RUNTIME_APP_BLACKLIST` 移除 `xte`、`npc`、`trim.sync_server` —— 它们是有 manifest 的正常应用，此前被误判为运行时环境而不显示。
+- **垃圾条目剔除**：扫描只认带 manifest 的应用（`SYSTEM_APPS` 登记的除外），不再出现无 manifest 的壳目录 `app` 与安装残留目录 `fndesk_<时间戳>`。
+- **显示名与桌面对齐**：日志中心→日志、快照→文件快照、Trim.Seek→素材库 Seek、飞牛影视在线扩展→影视在线扩展管理（仅在解析结果等于旧名时替换，不影响其他语言）。
+- **接口口径统一**：`/api/apps/version` 的 `total` 改由 `_visible_apps()` 计算，与 `/api/apps` 一致。
+- **图标 MIME 修正**：`_mime_of_icon()` 按魔数返回真实类型，WebP 不再谎报 `image/png`。
+
+### v2.21.0（2026-10-30）
+
+- 应用列表自动感知：缓存 20 秒 TTL + 目录指纹，新增/卸载应用自动重扫
+- 新增 `/api/apps/version` 版本指纹接口，页面每 3 秒轮询自动更新
+- 修复公网（FRP）访问时图标 URL 错误指向内网端口导致图标不更新

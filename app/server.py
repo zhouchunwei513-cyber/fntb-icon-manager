@@ -27,6 +27,12 @@ FNTB 图标管理器 v2.16.0 - fnOS 应用图标统一管理
            修复第三方应用显示名误解析（FnMessageBot 被解析成"日志中心"——
            _find_po_translation 系统集中式 locale 仅限 trim.* 应用，第三方只搜自身 locale）；
            日志增强（resolve_display_name 输入日志等）
+- v2.21.1: ① 系统应用图标改为**本机静态文件优先**（/usr/trim/www/static/app/icons/<app>/icon.png，
+           root 直读，字节与飞牛桌面一致）；② 图标缓存/下载增加**魔数校验**，不再把 8893 字节的
+           登录页 HTML 当图标缓存；③ 黑名单移除 xte/npc/trim.sync_server（被误杀、桌面可见的真应用）；
+           ④ 无 manifest 的壳目录/安装残留（app、fndesk_<时间戳>）不再进列表；⑤ 显示名与飞牛桌面对齐
+           （日志/文件快照/素材库 Seek/影视在线扩展管理）；⑥ /api/apps/version 的 total 与 /api/apps 同口径；
+           ⑦ 图标 MIME 按魔数返回（WebP 不再谎报 image/png）
 """
 import os
 import sys
@@ -57,7 +63,7 @@ APP_DIR = os.environ.get("TRIM_APPDEST", os.path.dirname(os.path.abspath(__file_
 def _load_self_version():
     # v2.17.0: fnOS ��������Ӧ��װ�� /vol3/@appcenter/xxx��manifest ���ᷭ�Ƶ� /var/apps��
     # ���ز��ԣ�1) VAR_DIR/version �ļ� 2) ���� FNTB_VERSION 3) manifest ����λ�� 4) BUILTIN_VERSION
-    BUILTIN_VERSION = "2.20.1"
+    BUILTIN_VERSION = "2.21.1"
     # v2.18.6: VAR_DIR/version 是历史遗留文件（曾残留 2.18.0 误导面板版本显示），
     # 优先级降到 manifest 之后；安装包 manifest 为真实版本来源。
     _candidates = []
@@ -143,6 +149,10 @@ SYSTEM_APPS = {
 #   ② get_icon/client_icon 对系统应用返回 302 重定向到官方图标（客户端 fetch 自动跟随）。
 # webui 地址来源优先级：config.json nas_webui > 环境变量 TRIM_NAS_WEBUI > nas_host 推断 > 自动探测。
 SYSTEM_WEBUI_ICON_PATH = "/static/app/icons/{app}/icon.png"
+# v2.21.1: 本机 webui 静态图标目录。本应用以 root 运行在 NAS 宿主机上，可直接读盘拿到
+# 与飞牛桌面渲染完全一致的官方图标，无需登录会话；HTTP 下载只作兜底（无会话时拿到的是
+# 8893 字节的登录页 HTML，会被当成图标缓存）。
+LOCAL_WEBUI_ICON_DIR = "/usr/trim/www/static/app/icons"
 
 _webui_base_cache = {"val": None, "ts": 0.0}
 _sys_icon_ok_cache = {}  # appname -> (ts, bool)
@@ -237,6 +247,10 @@ def _get_nas_webui_base():
 
 def _system_webui_icon_ok(appname):
     """系统应用官方图标是否可用（带 600s 缓存）。"""
+    # v2.21.1: 本机静态图标存在即视为可用——不再做那种"拿不到登录态也必然返回 200"的 HTTP 探测
+    if _local_system_icon(appname):
+        _sys_icon_ok_cache[appname] = (time.time(), True)
+        return True
     base = _get_nas_webui_base()
     if not base:
         return False
@@ -258,12 +272,68 @@ def _system_icon_cache_file(appname):
     safe = "".join(c if (c.isalnum() or c in "._-") else "_" for c in str(appname))
     return os.path.join(SYS_ICONS_DIR, safe + ".png")
 
+_IMAGE_HEADS = (
+    b"\x89PNG\r\n\x1a\n",   # PNG
+    b"\xff\xd8\xff",         # JPEG
+    b"GIF8",                  # GIF
+    b"BM",                    # BMP
+    b"\x00\x00\x01\x00",     # ICO
+)
+
+def _icon_head_ok(head):
+    """v2.21.1: 判断文件头是否是图片魔数（防把 HTML 登录页当图标缓存）。"""
+    if not head:
+        return False
+    try:
+        b = bytes(head)
+    except Exception:
+        return False
+    if b[:4] == b"RIFF" and b[8:12] == b"WEBP":
+        return True
+    for magic in _IMAGE_HEADS:
+        if b.startswith(magic):
+            return True
+    t = b.lstrip()[:8].lower()
+    return t.startswith(b"<svg") or t.startswith(b"<?xml")
+
+
+def _icon_magic_ok(path):
+    """文件存在、非空且头 16 字节是合法图片魔数。"""
+    try:
+        if not os.path.isfile(path) or os.path.getsize(path) < 100:
+            return False
+        with open(path, "rb") as f:
+            head = f.read(16)
+        return _icon_head_ok(head)
+    except Exception:
+        return False
+
+
+def _local_system_icon(appname):
+    """v2.21.1: 本机 webui 静态图标（root 直接读盘），命中返回路径，否则 None。"""
+    try:
+        safe = "".join(ch for ch in str(appname) if (ch.isalnum() or ch in "._-"))
+        if not safe:
+            return None
+        p = os.path.join(LOCAL_WEBUI_ICON_DIR, safe, "icon.png")
+        if _icon_magic_ok(p):
+            return p
+    except Exception:
+        pass
+    return None
+
+
 def _fetch_system_icon_file(appname):
     """v2.18.6: 服务端代理下载 NAS 官方系统应用图标并缓存（sys_icons/）。
     根因：get_icon 302 到 NAS webui 静态地址后，浏览器/客户端网络不可达该地址，
     且 v2.18.4 302 分支 f-string 引用未定义 _nas_host 直接 NameError 500，
     导致系统应用图标全部黑块。代理下载后直接返回图片字节，任何网络拓扑都有效。"""
     try:
+        # v2.21.1: 本机静态图标优先——与飞牛桌面字节一致，且不受登录态影响
+        local = _local_system_icon(appname)
+        if local:
+            logger.info(f"sys_icon 本机静态命中: {appname} -> {local}")
+            return local
         cached = _system_icon_cache_file(appname)
         if _is_valid_icon_file(cached):
             logger.info(f"sys_icon 缓存命中: {appname} -> {cached}")
@@ -281,8 +351,10 @@ def _fetch_system_icon_file(appname):
         except Exception as e:
             logger.warning(f"sys_icon 下载异常: {appname} url={url} err={e}")
             return None
-        if not data or len(data) < 100:
-            logger.warning(f"sys_icon 下载数据无效: {appname} url={url} bytes={len(data) if data else 0}")
+        if not data or len(data) < 100 or not _icon_head_ok(data[:16]):
+            # v2.21.1: 无登录会话时 NAS 返回的是登录页 HTML（常见 8893 字节），必须按魔数丢弃
+            logger.warning(f"sys_icon 下载数据无效(非图片): {appname} url={url} "
+                           f"bytes={len(data) if data else 0} head={bytes(data[:8])!r}")
             return None
         os.makedirs(SYS_ICONS_DIR, exist_ok=True)
         with open(cached, "wb") as f:
@@ -356,10 +428,11 @@ def _strip_port_from_host(host):
 
 RUNTIME_APP_BLACKLIST = {
     "bunjs", "nodejs_v22", "nodejs_v24", "python312", "python311", "python310",
-    "xte", "npc", "fn-open-vm-tools", "open-vm-tools",
+    "fn-open-vm-tools", "open-vm-tools",
     "trim-base", "trim.base", "trim.ai-runtime-amd-migraphx",
-    "trim.sync_server",
 }
+# v2.21.1: xte / npc / trim.sync_server 从黑名单移除——它们不是运行时依赖，
+# 而是飞牛桌面正常显示的已安装应用（XTE、NPC客户端、飞牛同步），此前被误过滤。
 
 def _is_runtime_app(appname):
     """�ж��Ƿ�Ϊ���б�Ӧ�ù��˵���ʱ��/�ⲿ������������ɸ��졣"""
@@ -1166,6 +1239,24 @@ def scan_all_apps():
     return _scan_all_apps_local()
 
 
+# v2.21.1: 与飞牛桌面显示名对齐（key=appname, (旧显示名, 桌面显示名)）。
+# 只在解析结果恰好等于旧显示名时才替换，其它语言/本地化场景不受影响。
+DISPLAY_NAME_FIX = {
+    "trim.log-center": ("日志中心", "日志"),
+    "trim.snapshots": ("快照", "文件快照"),
+    "trim.seek": ("Trim.Seek", "素材库 Seek"),
+    "fnmedia-ext": ("飞牛影视在线扩展", "影视在线扩展管理"),
+}
+
+
+def _align_display_name(appname, name):
+    pair = DISPLAY_NAME_FIX.get(appname)
+    if pair and name == pair[0]:
+        logger.info(f"display_name 对齐桌面: {appname} {pair[0]} -> {pair[1]}")
+        return pair[1]
+    return name
+
+
 def _scan_all_apps_local():
     """扫描所有已安装的 fnOS 应用（本地目录兜底）"""
     apps = []
@@ -1229,13 +1320,19 @@ def _scan_all_apps_local():
 
             # v2.12.0: 过滤已卸载残留——既无 manifest appname 声明、又无有效图标、也无 ui 配置的目录跳过
             _manifest_declared = bool(manifest.get("appname", ""))
+            # v2.21.1: 只认有 manifest 的应用。无 manifest 的目录（/usr/local/apps/@appcenter/app
+            # 这种只有 ui/images 图标、没有应用身份的壳目录，以及安装中途残留的 fndesk_<时间戳>）
+            # 不再进列表；SYSTEM_APPS 里登记过的系统内置应用除外。
+            if not _manifest_declared and appname not in SYSTEM_APPS:
+                logger.info(f"scan_all_apps 跳过无 manifest 非系统应用: {appname} (dir={app_dir})")
+                continue
             if not _manifest_declared and not has_icon_64 and not has_icon_256 and not ui_config:
                 logger.info(f"scan_all_apps 跳过疑似已卸载残留（无 manifest/图标/ui）: {app_dir}")
                 continue
 
             apps.append({
                 "name": appname,
-                "display_name": resolve_display_name(manifest, app_dir, appname),
+                "display_name": _align_display_name(appname, resolve_display_name(manifest, app_dir, appname)),
                 "version": manifest.get("version", ""),
                 "desc": manifest.get("desc", ""),
                 "source": manifest.get("source", ""),
@@ -1560,6 +1657,12 @@ def list_apps():
     return jsonify({"total": len(result), "apps": result})
 
 
+def _visible_apps():
+    """v2.21.1: 对外可见应用（与 list_apps 的过滤规则一致）。"""
+    return [a for a in get_apps_cache()
+            if a.get("desktop_entry") or not _is_runtime_app(a.get("name", ""))]
+
+
 @app.route("/api/apps/version")
 @app.route("/app/com.fntb.iconmgr/api/apps/version")
 def apps_version():
@@ -1568,7 +1671,8 @@ def apps_version():
     前端每 3s 轮询本接口，指纹（应用名集合 + 目录指纹）变化即自动重载列表与图标，
     无需用户手动刷新。返回体极小，不触发浏览器缓存。
     """
-    apps = get_apps_cache()
+    # v2.21.1: 与 /api/apps 同一口径（过滤运行库），此前 total 用未过滤数量，两者永远对不上
+    apps = _visible_apps()
     try:
         names = [a.get("name") for a in apps]
         ver = hashlib.md5((",".join(names) + "#" + str(_apps_fp)).encode("utf-8", "ignore")).hexdigest()[:16]
@@ -1941,11 +2045,33 @@ def _add_cache_headers(response, max_age=3600):
 
 
 def _is_valid_icon_file(path):
-    """图标文件必须存在且非空（0 字节文件视为无图标，避免 send_file 返回 200 空 body）"""
+    """图标文件必须存在、非空且是图片（v2.21.1: 增加魔数校验，
+    避免把 HTML/JSON 之类的错误响应当图标发给客户端）。"""
     try:
-        return os.path.isfile(path) and os.path.getsize(path) > 0
+        if not path or not os.path.isfile(path) or os.path.getsize(path) <= 0:
+            return False
+        return _icon_magic_ok(path)
     except Exception:
         return False
+
+
+def _mime_of_icon(path):
+    """v2.21.1: 按魔数猜 MIME，避免 WebP/JPEG 被硬编码成 image/png。"""
+    try:
+        with open(path, "rb") as f:
+            h = f.read(16)
+    except Exception:
+        return "image/png"
+    if h[:4] == b"RIFF" and h[8:12] == b"WEBP":
+        return "image/webp"
+    if h.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if h.startswith(b"GIF8"):
+        return "image/gif"
+    t = h.lstrip()[:8].lower()
+    if t.startswith(b"<svg") or t.startswith(b"<?xml"):
+        return "image/svg+xml"
+    return "image/png"
 
 
 def _serve_icon_with_cache(icon_path, size, target_size=256, max_age=0):
@@ -1961,7 +2087,7 @@ def _serve_icon_with_cache(icon_path, size, target_size=256, max_age=0):
     if request.args.get("t") or request.args.get("v"):
         max_age = 0
     if size == target_size or target_size in (256, 64):
-        resp = send_file(icon_path, mimetype="image/png", max_age=max_age)
+        resp = send_file(icon_path, mimetype=_mime_of_icon(icon_path), max_age=max_age)
         return _add_cache_headers(resp, max_age)
     try:
         img = Image.open(icon_path)
