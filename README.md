@@ -123,6 +123,25 @@ POST /api/refresh
 
 强制刷新应用扫描缓存。
 
+### 桌面清单同步（v2.21.3）
+
+```bash
+# 客户端推送（覆盖式）
+curl -X POST http://<nas>:18080/api/desktop-sync \
+  -H 'Content-Type: application/json' \
+  -d '{"apps":[{"name":"trim.setting","title":"系统设置"},{"name":"trim.music","title":"音乐"}],
+       "client":{"name":"fnos-desktop","version":"5.3.8"}}'
+# => {"ok":true,"synced":true,"total":2,"at":1763000000,"mode":"desktop-sync"}
+
+# 查看状态
+curl http://<nas>:18080/api/desktop-sync
+# => {"ok":true,"synced":true,"stale":false,"at":...,"age":12,"ttl":2592000,
+#     "client":{"name":"fnos-desktop","version":"5.3.8"},"total":2,"apps":[...]}
+
+# 清除同步（回到本地规则）
+curl -X DELETE http://<nas>:18080/api/desktop-sync
+```
+
 ### 应用列表版本指纹
 
 ```
@@ -214,6 +233,18 @@ Content-Type: application/json
 MIT
 
 ## 更新记录
+
+### v2.21.3（2026-11-14）
+- 新增「**桌面清单同步**」（方案 A）：飞牛前端的桌面条目走加密会话（RSA/AES）与 OAuth，
+  而 `/oauthapi` 只对 `OfficialAppUsers` 组的官方应用开放，第三方 FPK 拿不到 token
+  （详见 issue 说明）。因此改由**客户端**把自己在飞牛桌面上实际看到的应用列表推过来，本服务以它为真值。
+  - `POST /api/desktop-sync`：`{"apps":[{"name":"trim.setting","title":"系统设置"}], "client":{"name":"fnos-desktop","version":"5.3.8"}}`
+  - `GET /api/desktop-sync`：查看同步状态（`synced / stale / at / age / client / total / apps`）
+  - `DELETE /api/desktop-sync`：清除同步，回落到本地规则
+- 同步生效时 `/api/apps` **严格返回同步清单里的应用并按桌面顺序排列**，`/api/apps/version` 同口径；
+  清单存 `var/desktop_sync.json`，**30 天有效**，过期自动回落本地规则（与 v2.21.2 行为一致）。
+- 页面顶部显示同步状态（来自哪个客户端、几项、多久前），便于确认是否已同步。
+- 配套客户端：FNOS 桌面客户端 5.3.8 起，主窗加载完成后自动同步一次（同一份清单 6 小时内不重推，每 15 分钟复查）。
 
 ### v2.21.2（2026-11-14）
 - **默认只显示飞牛桌面上的应用**：`/api/apps` 现在返回 29 项，与飞牛桌面完全一致（此前 33 项）。

@@ -63,7 +63,7 @@ APP_DIR = os.environ.get("TRIM_APPDEST", os.path.dirname(os.path.abspath(__file_
 def _load_self_version():
     # v2.17.0: fnOS ��������Ӧ��װ�� /vol3/@appcenter/xxx��manifest ���ᷭ�Ƶ� /var/apps��
     # ���ز��ԣ�1) VAR_DIR/version �ļ� 2) ���� FNTB_VERSION 3) manifest ����λ�� 4) BUILTIN_VERSION
-    BUILTIN_VERSION = "2.21.2"
+    BUILTIN_VERSION = "2.21.3"
     # v2.18.6: VAR_DIR/version 是历史遗留文件（曾残留 2.18.0 误导面板版本显示），
     # 优先级降到 manifest 之后；安装包 manifest 为真实版本来源。
     _candidates = []
@@ -1319,11 +1319,104 @@ def _desktop_hidden_set():
     return hidden
 
 
+# ── v2.21.3: 客户端同步的桌面清单（方案 A）──────────────────────
+# 飞牛前端走加密会话（RSA/AES）取「用户桌面条目」，且 /oauthapi 只对 OfficialAppUsers
+# 组的官方应用开放，第三方 FPK 拿不到 token。因此改为：客户端（PC/平板）把自己在飞牛
+# 桌面上实际看到的应用列表 POST 过来，本服务以它为准。
+#   POST /api/desktop-sync  {"apps":[{"name":"trim.setting","title":"设置"}], "client":{"name":"fnos-desktop","version":"5.3.7"}}
+#   GET  /api/desktop-sync  查看当前同步状态
+# 同步数据 30 天内有效；过期或从未同步时回落到本地规则（ui/config 的 noDisplay +
+# DESKTOP_HIDE_EXTRA）。
+DESKTOP_SYNC_FILE = os.path.join(VAR_DIR, "desktop_sync.json")
+DESKTOP_SYNC_TTL = 30 * 24 * 3600
+_DSYNC_CACHE = {"stamp": None, "names": None}
+
+
+def _load_desktop_sync():
+    try:
+        if os.path.isfile(DESKTOP_SYNC_FILE):
+            with open(DESKTOP_SYNC_FILE, "r", encoding="utf-8") as f:
+                raw = json.load(f) or {}
+            apps = raw.get("apps")
+            if isinstance(apps, list):
+                out = []
+                for it in apps:
+                    if isinstance(it, str):
+                        out.append({"name": it, "title": ""})
+                    elif isinstance(it, dict) and isinstance(it.get("name"), str):
+                        out.append({"name": it["name"], "title": str(it.get("title") or "")})
+                raw["apps"] = out
+                return raw
+    except Exception as e:
+        logger.warning("desktop_sync 读取失败: %s", e)
+    return None
+
+
+def _save_desktop_sync(raw):
+    try:
+        d = os.path.dirname(DESKTOP_SYNC_FILE)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        tmp = DESKTOP_SYNC_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(raw, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, DESKTOP_SYNC_FILE)
+        _DSYNC_CACHE["stamp"] = None
+        _DSYNC_CACHE["names"] = None
+        return True
+    except Exception as e:
+        logger.warning("desktop_sync 写入失败: %s", e)
+        return False
+
+
+def _desktop_sync_names():
+    """客户端同步来的桌面应用名（保持桌面顺序）。无有效同步数据时返回 None。"""
+    try:
+        st = os.stat(DESKTOP_SYNC_FILE)
+        stamp = (st.st_mtime, st.st_size)
+    except Exception:
+        stamp = None
+    if _DSYNC_CACHE["stamp"] == stamp:
+        return _DSYNC_CACHE["names"]
+    names = None
+    raw = _load_desktop_sync() if stamp else None
+    if raw:
+        try:
+            at = float(raw.get("at") or 0)
+        except Exception:
+            at = 0
+        if at and (time.time() - at) <= DESKTOP_SYNC_TTL:
+            seen = []
+            for it in raw.get("apps") or []:
+                if it["name"] not in seen:
+                    seen.append(it["name"])
+            names = seen or None
+    _DSYNC_CACHE["stamp"] = stamp
+    _DSYNC_CACHE["names"] = names
+    return names
+
+
+def _sort_by_desktop_sync(apps):
+    """按桌面顺序排序（未在同步清单里的排最后）。"""
+    names = _desktop_sync_names()
+    if not names:
+        return apps
+    idx = {n: i for i, n in enumerate(names)}
+    return sorted(apps, key=lambda a: idx.get(a.get("name", ""), len(idx)))
+
+
 def is_desktop_app(app):
-    """v2.21.2: 该应用是否应该出现在「桌面应用」列表里。"""
+    """v2.21.3: 该应用是否应该出现在「桌面应用」列表里。
+
+    ①客户端同步过桌面清单 → 完全以同步清单为准；
+    ②否则回落到本地规则（ui/config 全部入口 noDisplay + DESKTOP_HIDE_EXTRA）。
+    """
     name = app.get("name", "")
     if not name:
         return False
+    _synced = _desktop_sync_names()
+    if _synced is not None:
+        return name in set(_synced)
     if app.get("ui_all_no_display"):
         return False
     return name not in _desktop_hidden_set()
@@ -1739,14 +1832,17 @@ def list_apps():
             }
         })
 
+    result = _sort_by_desktop_sync(result)
+
     return jsonify({"total": len(result), "apps": result})
 
 
 def _visible_apps():
     """v2.21.1: 对外可见应用（与 list_apps 的过滤规则一致）。"""
-    return [a for a in get_apps_cache()
-            if (a.get("desktop_entry") or not _is_runtime_app(a.get("name", "")))
-            and is_desktop_app(a)]
+    return _sort_by_desktop_sync(
+        [a for a in get_apps_cache()
+         if (a.get("desktop_entry") or not _is_runtime_app(a.get("name", "")))
+         and is_desktop_app(a)])
 
 
 @app.route("/api/desktop-filter", methods=["GET", "POST"])
@@ -1773,6 +1869,67 @@ def desktop_filter_api():
             data[k] = [str(x) for x in payload[k] if isinstance(x, str)]
     ok = _save_desktop_filter(data)
     return (jsonify({"ok": ok, "hidden": sorted(_desktop_hidden_set())}), 200 if ok else 500)
+
+
+@app.route("/api/desktop-sync", methods=["GET", "POST", "DELETE"])
+@app.route("/app/com.fntb.iconmgr/api/desktop-sync", methods=["GET", "POST", "DELETE"])
+def desktop_sync_api():
+    """v2.21.3: 客户端同步「飞牛桌面上实际显示的应用」清单。
+
+    POST   {"apps":[{"name","title"}...], "client":{"name","version"}} 覆盖式保存
+    DELETE                                                            清除同步，回落本地规则
+    GET    -> {ok, synced, stale, at, age, ttl, client, total, apps}
+    """
+    if request.method == "DELETE":
+        ok = _save_desktop_sync({"apps": [], "at": 0, "client": {}})
+        return (jsonify({"ok": ok, "synced": False, "total": 0, "mode": "local-rules"}), 200 if ok else 500)
+    if request.method == "GET":
+        raw = _load_desktop_sync() or {}
+        names = _desktop_sync_names()
+        apps = raw.get("apps") or []
+        try:
+            at = int(float(raw.get("at") or 0))
+        except Exception:
+            at = 0
+        return jsonify({
+            "ok": True,
+            "synced": names is not None,
+            "stale": bool(apps) and names is None,
+            "at": at,
+            "age": (int(time.time()) - at) if at else None,
+            "ttl": DESKTOP_SYNC_TTL,
+            "client": raw.get("client") or {},
+            "total": len(apps) if names is not None else 0,
+            "apps": apps if names is not None else [],
+        })
+    payload = request.get_json(silent=True) or {}
+    if payload.get("clear"):
+        ok = _save_desktop_sync({"apps": [], "at": 0, "client": {}})
+        return (jsonify({"ok": ok, "synced": False, "total": 0, "mode": "local-rules"}), 200 if ok else 500)
+    items = payload.get("apps")
+    if not isinstance(items, list) or not items:
+        return jsonify({"ok": False, "error": "apps 必须是非空数组"}), 400
+    out, seen = [], set()
+    for it in items:
+        name = it if isinstance(it, str) else (it or {}).get("name")
+        if not isinstance(name, str):
+            continue
+        name = name.strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        title = "" if isinstance(it, str) else str((it or {}).get("title") or "")
+        out.append({"name": name, "title": title[:80]})
+    if not out:
+        return jsonify({"ok": False, "error": "apps 里没有有效的应用名"}), 400
+    client = payload.get("client") if isinstance(payload.get("client"), dict) else {}
+    client = {k: str(v)[:120] for k, v in client.items() if k in ("name", "version", "host", "platform")}
+    raw = {"at": int(time.time()), "client": client, "apps": out}
+    ok = _save_desktop_sync(raw)
+    if ok:
+        logger.info("desktop_sync 收到 %d 个应用 client=%s", len(out), client.get("name", ""))
+    return (jsonify({"ok": ok, "synced": ok, "total": len(out), "at": raw["at"],
+                     "mode": "desktop-sync" if ok else "local-rules"}), 200 if ok else 500)
 
 
 @app.route("/api/apps/version")

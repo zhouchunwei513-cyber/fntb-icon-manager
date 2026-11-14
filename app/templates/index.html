@@ -43,6 +43,9 @@
         .desk-only { display:flex; align-items:center; gap:8px; padding:0 24px 10px;
             font-size:13px; color:var(--text-dim); cursor:pointer; user-select:none; }
         .desk-only input { width:15px; height:15px; accent-color:#3b82f6; cursor:pointer; }
+        /* v2.21.3: 客户端同步状态 */
+        .desk-sync { padding: 0 24px 12px; font-size: 12px; color: var(--text-dim); line-height: 1.6; }
+        .desk-sync b { color: var(--primary); font-weight: 600; }
 
         .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; padding: 16px 24px; }
 
@@ -131,6 +134,7 @@
     <label class="desk-only" title="默认只显示飞牛桌面上的应用；取消勾选可看到全部已安装应用（含桌面不显示的扩展管理与文件类型应用）">
         <input type="checkbox" id="deskOnlyChk" checked onchange="loadApps()"> 仅显示飞牛桌面上的应用
     </label>
+    <div class="desk-sync" id="deskSync"></div>
 
     <!-- App Grid -->
     <div class="grid" id="appGrid">
@@ -609,6 +613,31 @@ async function exportLogs() {
 }
 
 // ── Load apps ──
+// ── v2.21.3: 桌面清单来自客户端同步（方案 A）──
+function _agoText(sec) {
+    if (sec == null) return "未知时间";
+    if (sec < 60) return "刚刚";
+    if (sec < 3600) return Math.floor(sec / 60) + " 分钟前";
+    if (sec < 86400) return Math.floor(sec / 3600) + " 小时前";
+    return Math.floor(sec / 86400) + " 天前";
+}
+async function loadDesktopSyncInfo() {
+    const el = document.getElementById("deskSync");
+    if (!el) return;
+    let d = null;
+    try { d = await apiGet("/api/desktop-sync"); } catch (_) {}
+    if (!d || !d.ok) { el.textContent = ""; return; }
+    const c = d.client || {};
+    if (d.synced) {
+        el.innerHTML = `桌面清单同步自客户端：<b>${d.total}</b> 项（${escHtml(c.name || "客户端")} ${escHtml(c.version || "")}，${_agoText(d.age)}）`;
+        el.title = "清单由客户端在打开飞牛桌面时自动同步，30 天内有效；换了用户或改了桌面，客户端会再次同步覆盖。";
+    } else if (d.stale) {
+        el.textContent = "客户端同步已过期，当前按本地规则推断；重新打开一次客户端即可再次同步。";
+    } else {
+        el.textContent = "尚未与客户端同步，当前按本地规则推断（打开一次飞牛桌面客户端即会自动同步）。";
+    }
+}
+
 async function loadApps() {
     let path = "/api/apps";
     const params = [];
@@ -625,6 +654,7 @@ async function loadApps() {
     if (!data) return;
     allApps = data.apps || [];
     document.getElementById("stats").textContent = `共 ${data.total} 个应用`;
+    loadDesktopSyncInfo();
     renderApps();
 }
 
